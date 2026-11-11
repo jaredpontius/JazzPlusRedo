@@ -28,14 +28,31 @@
     muted: '<svg viewBox="0 0 24 24"><path d="M3 9.5v5c0 .55.45 1 1 1h3l4.3 3.8c.64.57 1.7.11 1.7-.75V5.45c0-.86-1.06-1.32-1.7-.75L7 8.5H4c-.55 0-1 .45-1 1zm13.3-.8 1.4-1.4L20 9.6l2.3-2.3 1.4 1.4-2.3 2.3 2.3 2.3-1.4 1.4-2.3-2.3-2.3 2.3-1.4-1.4 2.3-2.3z"/></svg>',
     sound: '<svg viewBox="0 0 24 24"><path d="M3 9.5v5c0 .55.45 1 1 1h3l4.3 3.8c.64.57 1.7.11 1.7-.75V5.45c0-.86-1.06-1.32-1.7-.75L7 8.5H4c-.55 0-1 .45-1 1zM16.5 12a4.5 4.5 0 0 0-2.5-4.03v8.06A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54z"/></svg>',
   };
+  // In fullscreen the browser only shows the fullscreen element, so floating
+  // UI (toasts, Skip buttons) must live inside it while fullscreen is on.
+  function overlayLayer() {
+    const fs = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fs && fs.tagName !== "VIDEO") return fs;
+    return document.body;
+  }
+  function keepInLayer(el) {
+    if (!el) return;
+    const layer = overlayLayer();
+    if (el.parentElement !== layer) layer.appendChild(el);
+  }
+  document.addEventListener("fullscreenchange", () => {
+    keepInLayer(document.getElementById("segfix-skipbox"));
+    keepInLayer(document.getElementById("segfix-toast"));
+  });
+
   let toastTimer = null;
   function toast(html, side = "center") {
     let el = document.getElementById("segfix-toast");
     if (!el) {
       el = document.createElement("div");
       el.id = "segfix-toast";
-      document.body.appendChild(el);
     }
+    keepInLayer(el);
     el.innerHTML = html;
     el.classList.remove("left", "right", "show");
     if (side !== "center") el.classList.add(side);
@@ -266,7 +283,7 @@
       '<button type="button" data-sp="0" title="The very beginning (includes pregame)">' +
       '<svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 6.2v11.6a1 1 0 0 1-1.55.83L10 12.83a1 1 0 0 1 0-1.66l8.45-5.8A1 1 0 0 1 20 6.2z"/></svg>From start</button>' +
       '<button type="button" data-sp="tip" title="Right at the opening tip">' +
-      '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 12h17M12 3.5v17" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>From tip-off</button>' +
+      '<svg viewBox="0 0 24 24"><path d="M5 4h14v2.5H5zM6.2 20h11.6a1 1 0 0 0 .83-1.55L12.83 9.7a1 1 0 0 0-1.66 0l-5.8 8.75A1 1 0 0 0 6.2 20z"/></svg>From tip-off</button>' +
       '<button type="button" data-sp="-1" title="Jump to live" class="segfix-live-btn"><span class="live-dot"></span>Live</button>';
     if (!withLive) row.querySelector(".segfix-live-btn").remove();
     row.addEventListener("click", (e) => {
@@ -1061,6 +1078,8 @@
     if (skipping) return;
     if (skipAdClips()) { toast("Skipping ad…"); return; }
     const now = epochNow();
+    const ht0 = halftimeAt(now);
+    if (ht0) return jumpTo(ht0.end + 0.3, pbp.hockey ? "Next period ▶" : "Second half ▶");
     const brk = scteBreakAt(now);
     if (brk) return jumpTo(brk.end + 0.3, "Back to the game ▶");
     const ht = halftimeAt(now);
@@ -1083,10 +1102,10 @@
       box.innerHTML =
         `<button type="button" class="segfix-skipbtn main"><span class="lbl">Skip commercial</span>${SKIP_ICON}<kbd class="segfix-key">&#9166;</kbd></button>` +
         `<button type="button" class="segfix-skipbtn ht"><span class="lbl">Skip halftime</span>${SKIP_ICON}<kbd class="segfix-key">H</kbd></button>`;
-      box.querySelector(".main").addEventListener("click", (e) => { e.stopPropagation(); skipBreak(); });
+      box.querySelector(".main").addEventListener("click", (e) => { e.stopPropagation(); e.currentTarget.dataset.mode === "half" ? skipHalftime() : skipBreak(); });
       box.querySelector(".ht").addEventListener("click", (e) => { e.stopPropagation(); skipHalftime(); });
-      document.body.appendChild(box);
     }
+    keepInLayer(box);
     return box;
   }
   const mmss = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
@@ -1103,14 +1122,17 @@
     const all = allBreaks();
     const brk = now == null ? null : all.ads.find((b) => now >= b.start - 0.5 && now < b.end);
     const ht = now == null ? null : all.halves.find((b) => now >= b.start - 0.5 && now < b.end);
+    // Only one button: during halftime it skips the whole halftime.
     box.classList.toggle("show", !!brk || !!ht || adVideos().length > 0);
-    box.classList.toggle("halftime", !!ht);
+    box.classList.remove("halftime");
     const main = box.querySelector(".main .lbl");
-    const htl = box.querySelector(".ht .lbl");
     const word = all.exact ? "Skip commercial" : "Skip to game";
-    if (main) main.textContent = brk ? `${word} · ${mmss(Math.max(0, Math.round(brk.end - now)))}` : ht ? (pbp.hockey ? "Intermission" : "Halftime show") : word;
-    box.querySelector(".main").classList.toggle("muted", !brk && !!ht);
-    if (htl && ht) htl.textContent = `Skip ${halfName()} · ${mmss(Math.max(0, Math.round(ht.end - now)))}`;
+    if (main) {
+      if (ht) main.textContent = `Skip ${halfName()} · ${mmss(Math.max(0, Math.round(ht.end - now)))}`;
+      else if (brk) main.textContent = `${word} · ${mmss(Math.max(0, Math.round(brk.end - now)))}`;
+      else main.textContent = word;
+    }
+    box.querySelector(".main").dataset.mode = ht ? "half" : "ad";
   }, 500);
   actions.s = () => skipBreak();
   // While a Skip button is showing, Enter or the right arrow skips too.
@@ -1265,7 +1287,7 @@
         '<div class="ch-q">How do you want to watch?</div>' +
         '<div class="ch-btns' + (live ? " three" : "") + '">' +
           '<button type="button" class="ch-btn" data-a="start"><span class="ch-ic"><svg viewBox="0 0 24 24"><path d="M5 5h2.5v14H5zM19.5 6.2v11.6a1 1 0 0 1-1.55.83L9.5 12.83a1 1 0 0 1 0-1.66l8.45-5.8a1 1 0 0 1 1.55.83z"/></svg></span><span class="ch-tx"><b>From the beginning</b><small>Includes the pregame</small></span></button>' +
-          '<button type="button" class="ch-btn primary" data-a="tip"><span class="ch-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 12h17M12 3.5v17M6 5.8c2.6 3.2 2.6 9.2 0 12.4M18 5.8c-2.6 3.2-2.6 9.2 0 12.4" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></span><span class="ch-tx"><b>At tip-off</b><small>Skip the pregame</small></span></button>' +
+          '<button type="button" class="ch-btn primary" data-a="tip"><span class="ch-ic"><svg viewBox="0 0 24 24"><path d="M5 4h14v2.5H5zM6.2 20h11.6a1 1 0 0 0 .83-1.55L12.83 9.7a1 1 0 0 0-1.66 0l-5.8 8.75A1 1 0 0 0 6.2 20z"/></svg></span><span class="ch-tx"><b>At tip-off</b><small>Skip the pregame</small></span></button>' +
           (live ? '<button type="button" class="ch-btn" data-a="live"><span class="ch-ic"><span class="live-dot"></span></span><span class="ch-tx"><b>Watch live</b><small>Jump in right now</small></span></button>' : "") +
         "</div>" +
         '<button type="button" class="ch-link" data-a="resume">or keep watching from here</button>' +
@@ -1336,7 +1358,7 @@
     // A plain timer (not requestAnimationFrame) so it also runs in background tabs.
     setTimeout(() => {
       scheduled = false;
-      for (const fn of [installGuard, decorateCards, decorateWatchPage, runPendingStart, decorateRecords, decorateControls, dismissStillWatching]) {
+      for (const fn of [installGuard, decorateCards, decorateWatchPage, runPendingStart, decorateRecords, dismissStillWatching]) {
         try { fn(); } catch (e) {}  // one failing step never blocks the others
       }
     }, 60);

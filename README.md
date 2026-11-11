@@ -20,7 +20,7 @@ like normal, and it's just... better. No settings. No account. No nonsense.
 - 🎬 **Pick how you start, every game.** A slick matchup card asks: from the beginning, at tip-off, or live.
 - 🏀 **Tip-off means tip-off.** Lands ~3 seconds before the jump ball. No pregame.
 - 🙈 **No spoilers while it loads.** The video stays covered until it's at the right spot.
-- ⏭️ **Skips commercials** with one press (or hit **Enter**). Poof, back to the game.
+- ⏭️ **Skips commercials.** A button pops up when a break starts. Press it (or **Enter**). Poof, back to the game.
 - 🦓 **Skips ref reviews** too, often. Bye, four-minute monitor huddles.
 - 🥱 **Skips halftime** with **H**. Intermissions too, hockey fans.
 - ⬇️ **"Wait, what happened?"** Press **↓** to rewatch the last play.
@@ -30,7 +30,7 @@ like normal, and it's just... better. No settings. No account. No nonsense.
 - 🧹 **Zero clutter.** No spoiler chat, pop-ups, sponsor banners, or random video carousels.
 - 😴 **Never asks "Are you still watching?"** Yes. Yes we are.
 
-**Shortcuts:** Space play/pause · ←/→ 10s · **↓** last play · **S** skip · **H** halftime · **G** live · **M** mute · **F** fullscreen
+**Shortcuts:** Space play/pause · ←/→ 10s · **↓** last play · **Enter** / **S** skip break · **H** halftime · **G** live · **M** mute · **F** fullscreen
 
 ---
 

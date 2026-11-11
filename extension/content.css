@@ -1001,3 +1001,42 @@ button[data-segfix] ~ .segfix-starts {
 #segfix-chooser {
   background: #07040f !important;
 }
+
+/* --------------------------------------------------------------------------
+   14. Player controls centered at the bottom (keeps the score area clear)
+   -------------------------------------------------------------------------- */
+
+.player-controls .left-side {
+  position: absolute !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: auto !important;
+  flex: 0 0 auto !important;
+  justify-content: center !important;
+  padding-left: 0 !important;
+  z-index: 2;
+}
+.player-controls div:has(> .left-side) {
+  position: relative !important;
+  justify-content: flex-end !important;
+  min-height: 48px;
+}
+
+/* Bar order: ⏮ · ↺10 · ▶ · ↻10 · volume, evenly spaced, play in the middle */
+.player-controls .left-side {
+  gap: 18px !important;
+  align-items: center !important;
+}
+.player-controls .left-side > * {
+  margin: 0 !important;
+}
+.player-controls .left-side > button[title="START OVER"] { order: 1; }
+.player-controls .left-side > button[aria-label="Rewind 10 Seconds"] { order: 2; }
+.player-controls .left-side > .play-pause-btn { order: 3; width: 48px !important; height: 48px !important; }
+.player-controls .left-side > button[aria-label="Forward 10 Seconds"] { order: 4; }
+.player-controls .left-side > .volume-controls { order: 5; }
+.player-controls .left-side > .play-pause-btn svg,
+.player-controls .left-side > .play-pause-btn img { transform: scale(1.15); }
+
+/* Skip break no longer lives in the bar: the pop-up handles it */
+.segfix-skipbreak { display: none !important; }
