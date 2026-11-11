@@ -1,4 +1,4 @@
-// SEG+ Better Player — extras: keyboard shortcuts + idle cursor hiding.
+// JazzPlusRedo — extras: keyboard shortcuts + idle cursor hiding.
 // All the visual changes live in content.css; this file is optional.
 (() => {
   if (window.__segfixLoaded) {
@@ -636,7 +636,7 @@
     el.id = "segfix-diag";
     el.style.cssText = "position:fixed;left:16px;top:80px;z-index:2147483647;max-width:46vw;max-height:70vh;overflow:auto;margin:0;padding:12px 14px;border-radius:10px;background:rgba(0,0,0,.88);color:#b8f7c4;font:12px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;pointer-events:none";
     document.body.appendChild(el);
-    const render = () => { el.textContent = "SEG+ Better Player diagnostics (Shift+D to close)\n" + JSON.stringify(diagSnapshot(), null, 1); };
+    const render = () => { el.textContent = "JazzPlusRedo diagnostics (Shift+D to close)\n" + JSON.stringify(diagSnapshot(), null, 1); };
     render();
     diagTimer = setInterval(render, 500);
   }

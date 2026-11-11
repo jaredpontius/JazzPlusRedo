@@ -1,23 +1,23 @@
 #!/bin/sh
-# Better Player for SEG+ (unofficial) - Firefox installer for macOS.
+# JazzPlusRedo (unofficial) - Firefox installer for macOS.
 #
 # Install or update:
-#   curl -fsSL https://raw.githubusercontent.com/jaredpontius/segplus-better-player/main/firefox/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/firefox/install.sh | sh
 # Uninstall:
-#   curl -fsSL https://raw.githubusercontent.com/jaredpontius/segplus-better-player/main/firefox/install.sh | sh -s -- --remove
+#   curl -fsSL https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/firefox/install.sh | sh -s -- --remove
 #
 # What it does:
-#   1. Downloads the latest add-on into ~/Library/Application Support/Better Player for SEG/addon
+#   1. Downloads the latest add-on into ~/Library/Application Support/JazzPlusRedo/addon
 #   2. Adds two small startup files to Firefox.app so Firefox loads that add-on every time it opens.
 #      (Firefox only allows permanent add-ons that Mozilla has signed; this loader is the
 #       no-account alternative. It only loads the folder above.)
 set -e
 
-REPO="jaredpontius/segplus-better-player"
+REPO="jaredpontius/JazzPlusRedo"
 APP="/Applications/Firefox.app/Contents/Resources"
-DEST="$HOME/Library/Application Support/Better Player for SEG"
+DEST="$HOME/Library/Application Support/JazzPlusRedo"
 RAW="https://raw.githubusercontent.com/$REPO/main/firefox"
-ZIP_URL="https://github.com/$REPO/releases/latest/download/Better-Player-for-SEG-Firefox.zip"
+ZIP_URL="https://github.com/$REPO/releases/latest/download/JazzPlusRedo-Firefox.zip"
 
 if [ "$1" = "--remove" ]; then
   rm -f "$APP/mozilla.cfg" "$APP/defaults/pref/autoconfig.js"

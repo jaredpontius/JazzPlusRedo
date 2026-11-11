@@ -6,8 +6,8 @@
 Outputs:
   dist/chrome/                      unpacked Chrome extension (Load unpacked)
   dist/firefox/                     unpacked Firefox add-on
-  dist/Better-Player-for-SEG-Chrome.zip
-  dist/Better-Player-for-SEG-Firefox.zip
+  dist/JazzPlusRedo-Chrome.zip
+  dist/JazzPlusRedo-Firefox.zip
 """
 import json
 import pathlib
@@ -20,7 +20,7 @@ SRC = HERE / "extension"
 DIST = HERE / "dist"
 VERSION = (HERE / "VERSION").read_text().strip()
 
-NAME = "Better Player for SEG+"
+NAME = "JazzPlusRedo"
 DESCRIPTION = (
     "Unofficial. A cleaner, smoother SEG+ / Jazz+ player: no chat or clutter, "
     "skip commercials and halftime, team records, From start / Live."
@@ -55,7 +55,7 @@ def manifest(firefox: bool) -> dict:
     }
     if firefox:
         m["browser_specific_settings"] = {"gecko": {
-            "id": "better-player-for-segplus@unofficial",
+            "id": "jazzplusredo@unofficial",
             "strict_min_version": "128.0",
             "data_collection_permissions": {"required": ["none"]},
         }}
@@ -84,9 +84,9 @@ def main():
     chrome = build("chrome")
     firefox = build("firefox")
     # Chrome zip unzips to a folder you pick with "Load unpacked".
-    zip_dir(chrome, DIST / "Better-Player-for-SEG-Chrome.zip", inner="Better-Player-for-SEG")
+    zip_dir(chrome, DIST / "JazzPlusRedo-Chrome.zip", inner="JazzPlusRedo")
     # Firefox zip has the add-on files at the top level (the installer unzips it).
-    zip_dir(firefox, DIST / "Better-Player-for-SEG-Firefox.zip")
+    zip_dir(firefox, DIST / "JazzPlusRedo-Firefox.zip")
     print(f"Built v{VERSION}: dist/chrome, dist/firefox and both zips")
 
 

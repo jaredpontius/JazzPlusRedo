@@ -1,4 +1,4 @@
-# Better Player for SEG+ (unofficial)
+# JazzPlusRedo (unofficial)
 
 A cleaner, smoother way to watch **Utah Jazz** and **Utah Mammoth** games on [SEG+](https://www.segplus.com).
 It adds features to the SEG+ website in your browser. You still sign in with your own SEG+ subscription.
@@ -22,11 +22,11 @@ It adds features to the SEG+ website in your browser. You still sign in with you
 
 ## Install for Chrome (Mac or Windows)
 
-1. Download **[Better-Player-for-SEG-Chrome.zip](../../releases/latest/download/Better-Player-for-SEG-Chrome.zip)** and unzip it.
-   Keep the unzipped **Better-Player-for-SEG** folder somewhere it won't be deleted (like Documents).
+1. Download **[JazzPlusRedo-Chrome.zip](../../releases/latest/download/JazzPlusRedo-Chrome.zip)** and unzip it.
+   Keep the unzipped **JazzPlusRedo** folder somewhere it won't be deleted (like Documents).
 2. In Chrome, go to **`chrome://extensions`**
 3. Turn on **Developer mode** (top-right switch).
-4. Click **Load unpacked** and choose the **Better-Player-for-SEG** folder.
+4. Click **Load unpacked** and choose the **JazzPlusRedo** folder.
 5. Open or refresh segplus.com. Done!
 
 **To update:** download the new zip, replace the folder's contents, then click the ↻ reload icon on the extension in `chrome://extensions`.
@@ -36,7 +36,7 @@ It adds features to the SEG+ website in your browser. You still sign in with you
 Open **Terminal** (press ⌘ Space, type *Terminal*, press Return), paste this line, and press Return:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jaredpontius/segplus-better-player/main/firefox/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/firefox/install.sh | sh
 ```
 
 Then quit Firefox completely (**⌘Q**) and reopen it. That's it. It loads automatically every time.
@@ -45,7 +45,7 @@ Then quit Firefox completely (**⌘Q**) and reopen it. That's it. It loads autom
 - **To update:** run the same command again (no restart needed, just refresh the SEG+ tab).
 - **To uninstall:**
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/jaredpontius/segplus-better-player/main/firefox/install.sh | sh -s -- --remove
+  curl -fsSL https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/firefox/install.sh | sh -s -- --remove
   ```
 
 <details>
@@ -54,7 +54,7 @@ Then quit Firefox completely (**⌘Q**) and reopen it. That's it. It loads autom
 Firefox only keeps add-ons permanently if Mozilla has signed them. Instead, the installer uses
 Firefox's built-in startup-settings feature ("autoconfig") to load this add-on each time Firefox
 opens. It only loads this one add-on from
-`~/Library/Application Support/Better Player for SEG/addon`. The uninstall command removes everything.
+`~/Library/Application Support/JazzPlusRedo/addon`. The uninstall command removes everything.
 If a big Firefox update removes the startup files, just run the install command again.
 </details>
 
