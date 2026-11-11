@@ -28,9 +28,17 @@ DESCRIPTION = (
 MATCHES = ["https://segplus.com/*", "https://www.segplus.com/*"]
 
 
+KEYFRAME_SEL = re.compile(r"^\s*(from|to|[\d.]+%)(\s*,\s*(from|to|[\d.]+%))*\s*$")
+
+
 def make_important(css: str) -> str:
-    """Make every declaration !important so the site's own styles can't override it."""
+    """Make every declaration !important so the site's own styles can't override it.
+    Animation keyframes and @property rules can't take !important, so they're left alone."""
     def fix_block(m):
+        selector = re.split(r"[{};]", css[:m.start()])[-1]
+        selector = re.sub(r"/\*.*?\*/", "", selector, flags=re.S).strip()
+        if KEYFRAME_SEL.match(selector) or selector.startswith("@property"):
+            return m.group(0)
         parts = m.group(2).split(";")
         out = []
         for p in parts:

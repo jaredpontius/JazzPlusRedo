@@ -1,11 +1,7 @@
 // JazzPlusRedo — extras: keyboard shortcuts + idle cursor hiding.
 // All the visual changes live in content.css; this file is optional.
 (() => {
-  if (window.__segfixLoaded) {
-    // Bookmark clicked twice: just confirm it's on.
-    window.__segfixToast?.('<span class="live-dot" style="background:#7c4dff;box-shadow:0 0 10px #7c4dff"></span>SEG+ extras on');
-    return;
-  }
+  if (window.__segfixLoaded) return;
   window.__segfixLoaded = true;
 
   const root = document.documentElement;
@@ -101,6 +97,12 @@
       if (!document.getElementById("primaryViewer")) return;
       const key = e.shiftKey && /^d$/i.test(e.key) ? "D" : e.key.length === 1 ? e.key.toLowerCase() : e.key;
       const fn = actions[key === " " ? " " : key];
+      if (chooserOpen() && (key === "Enter" || key === "Escape")) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (key === "Enter") chooseStart("tip"); else closeChooser(true);
+        return;
+      }
       if (!fn) return;
       // Enter only belongs to us while a Skip button is on screen.
       if (key === "Enter") { const b = document.getElementById("segfix-skipbox"); if (!b || !b.classList.contains("show")) return; }
@@ -140,15 +142,13 @@
   }
   function findLiveButton() { return playerLiveButton(); }
 
+  // From start: the very beginning of the video (includes the pregame show).
   function goFromStart() {
     const p = bmPlayer();
-    const tip = gameStartEpoch(); // from play-by-play, if known
-    if (p && tip != null && seekEpoch(tip - 20)) { toast("Tip-off"); return true; }
     if (p) {
       try {
         if (p.isLive()) p.timeShift(p.getMaxTimeShift() + 1);
         else p.seek(0);
-        toast("From start");
         return true;
       } catch (e) {}
     }
@@ -156,14 +156,83 @@
     if (b) { b.click(); toast("From start"); return true; }
     return false;
   }
+  // From tip-off: ~3 seconds before the opening tip / puck drop (from play-by-play).
+  const TIP_LEAD = 3;
+  function goTipOff() {
+    const tip = gameStartEpoch();
+    if (bmPlayer() && tip != null && seekEpoch(tip - TIP_LEAD)) return true;
+    toast("Tip-off time not known, starting from the beginning");
+    return goFromStart();
+  }
   function goLive() {
     const p = bmPlayer();
-    try { if (p && p.isLive()) { p.timeShift(0); toast('<span class="live-dot"></span>LIVE'); return true; } } catch (e) {}
+    try { if (p && p.isLive()) { p.timeShift(0); return true; } } catch (e) {}
     const b = playerLiveButton();
     if (b) { b.click(); toast('<span class="live-dot"></span>LIVE'); return true; }
     return false;
   }
-  function doStart(sp) { return sp === "0" ? goFromStart() : goLive(); }
+  function doStart(sp) { coveredJump(sp === "tip" ? "tip" : sp === "0" ? "start" : "live"); return true; }
+
+  // ---- Covered jumps: hide the video until it's playing at the right spot --
+  function coverPlayer(label) {
+    const host = document.getElementById("videoPlayer") || document.getElementById("primaryViewer");
+    if (!host) return null;
+    let c = document.getElementById("segfix-cover");
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "segfix-cover";
+      c.innerHTML = '<div class="cv-spin"></div><div class="cv-label"></div>';
+      host.appendChild(c);
+    }
+    c.classList.remove("leaving");
+    c.querySelector(".cv-label").textContent = label || "";
+    return c;
+  }
+  function uncoverPlayer() {
+    const c = document.getElementById("segfix-cover");
+    if (!c) return;
+    c.classList.add("leaving");
+    setTimeout(() => c.remove(), 350);
+  }
+  // Where the player's own clock should end up for each choice, or null if unknown.
+  function targetFor(action) {
+    const p = bmPlayer();
+    if (!p) return null;
+    try {
+      if (p.isLive()) {
+        const liveEdge = p.getCurrentTime() - p.getTimeShift();
+        if (action === "tip") { const tip = gameStartEpoch(); if (tip != null) return tip - TIP_LEAD; }
+        if (action === "tip" || action === "start") return liveEdge + p.getMaxTimeShift() + 1;
+        if (action === "live") return liveEdge;
+      } else {
+        if (action === "tip") { const tip = gameStartEpoch(); if (tip != null && mediaEpoch0) return tip - TIP_LEAD - mediaEpoch0; }
+        if (action === "tip" || action === "start") return 0;
+      }
+    } catch (e) {}
+    return null;
+  }
+  // Pause, jump, wait until the picture is really at the target, then reveal + play.
+  async function coveredJump(action) {
+    const labels = { tip: pbp.hockey ? "Heading to puck drop…" : "Heading to tip-off…", start: "Going to the start…", live: "Going live…" };
+    coverPlayer(labels[action] || "Loading…");
+    const p = bmPlayer();
+    try { if (p.isMuted()) p.unmute(); if (p.getVolume() < 5) p.setVolume(60); } catch (e) {}
+    try { p.pause(); } catch (e) {}
+    if (action === "tip") for (let i = 0; i < 16 && gameStartEpoch() == null; i++) await sleep(400); // give play-by-play a moment
+    const ok = action === "tip" ? goTipOff() : action === "start" ? goFromStart() : action === "live" ? goLive() : true;
+    const target = targetFor(action);
+    const v = document.querySelector("#primaryViewer video");
+    for (let i = 0; i < 60; i++) {           // up to ~12s
+      await sleep(200);
+      let now = null;
+      try { now = bmPlayer().getCurrentTime(); } catch (e) {}
+      const arrived = target == null || (now != null && Math.abs(now - target) < 4);
+      if (ok && arrived && v && !v.seeking && v.readyState >= 3) break;
+    }
+    try { await bmPlayer().play(); } catch (e) {}
+    await sleep(350);                        // let the first frames paint
+    uncoverPlayer();
+  }
 
   // After opening a game from a card, wait until the player is ready, then go.
   function playerReady() {
@@ -178,10 +247,10 @@
     if (!p || Date.now() - p.t > 60000) return;
     pendingRunning = true;
     try {
-      for (let i = 0; i < 60 && !playerReady(); i++) await sleep(500);
-      if (p.sp === "0") for (let i = 0; i < 12 && gameStartEpoch() == null; i++) await sleep(500); // give play-by-play a moment
-      await sleep(800);
-      for (let i = 0; i < 10 && !doStart(p.sp); i++) await sleep(500);
+      // Cover right away so the old spot never shows, and keep it paused.
+      for (let i = 0; i < 60 && !coverPlayer(p.sp === "tip" ? "Heading to tip-off…" : p.sp === "0" ? "Going to the start…" : "Going live…"); i++) await sleep(100);
+      for (let i = 0; i < 120 && !playerReady(); i++) { try { bmPlayer()?.pause(); } catch (e) {} await sleep(250); }
+      await coveredJump(p.sp === "tip" ? "tip" : p.sp === "0" ? "start" : "live");
     } finally {
       try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
       pendingRunning = false;
@@ -194,8 +263,10 @@
     const row = document.createElement("div");
     row.className = "segfix-starts";
     row.innerHTML =
-      '<button type="button" data-sp="0" title="Start at tip-off">' +
+      '<button type="button" data-sp="0" title="The very beginning (includes pregame)">' +
       '<svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 6.2v11.6a1 1 0 0 1-1.55.83L10 12.83a1 1 0 0 1 0-1.66l8.45-5.8A1 1 0 0 1 20 6.2z"/></svg>From start</button>' +
+      '<button type="button" data-sp="tip" title="Right at the opening tip">' +
+      '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 12h17M12 3.5v17" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>From tip-off</button>' +
       '<button type="button" data-sp="-1" title="Jump to live" class="segfix-live-btn"><span class="live-dot"></span>Live</button>';
     if (!withLive) row.querySelector(".segfix-live-btn").remove();
     row.addEventListener("click", (e) => {
@@ -220,6 +291,38 @@
     return false;
   }
 
+  // Is this button inside a pop-up fixed over the page (not the hover card)?
+  function modalPanelFor(btn) {
+    let fixed = null;
+    for (let el = btn.parentElement; el && el !== document.body; el = el.parentElement) {
+      if (getComputedStyle(el).position === "fixed") { fixed = el; break; }
+    }
+    if (!fixed || fixed.closest("#primaryViewer")) return null;
+    // The visible panel: the first ancestor much wider than the button's column.
+    const holder = btn.parentElement;
+    let prevW = holder.getBoundingClientRect().width;
+    const path = [];
+    for (let el = holder.parentElement; el && el !== fixed.parentElement; el = el.parentElement) {
+      const w = el.getBoundingClientRect().width;
+      if (w > prevW * 1.4 && w > 500) return { panel: el, path };
+      path.push(el);
+      prevW = Math.max(prevW, w);
+    }
+    return null;
+  }
+  function layoutModal(btn) {
+    const holder = btn.parentElement;
+    const row = holder && (holder.nextElementSibling?.classList.contains("segfix-starts") ? holder.nextElementSibling : holder.querySelector(":scope > .segfix-starts"));
+    if (!row || holder.classList.contains("segfix-modal-row")) return;
+    const found = modalPanelFor(btn);
+    if (!found) return;
+    // Let every wrapper between the buttons and the panel use the full width.
+    for (const el of found.path) { el.style.width = "100%"; el.style.maxWidth = "none"; el.style.flex = "1 1 auto"; }
+    holder.classList.add("segfix-modal-row");
+    holder.appendChild(row);         // same row as Watch
+    row.classList.add("segfix-in-modal");
+  }
+
   // Game cards / schedule rows: add the buttons under Resume / Watch.
   function decorateCards() {
     for (const btn of document.querySelectorAll("button:not([data-segfix])")) {
@@ -227,17 +330,30 @@
       if (!START_LABELS.test(btn.textContent.trim())) continue;
       btn.dataset.segfix = "1";
       const holder = btn.parentElement;
-      if (!holder || holder.querySelector(":scope > .segfix-starts") || holder.nextElementSibling?.classList.contains("segfix-starts")) continue;
+      if (!holder || holder.querySelector(":scope > .segfix-starts") || holder.nextElementSibling?.classList.contains("segfix-starts")) continue; // already has buttons
       const row = makeStartRow((sp) => {
         try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ sp, t: Date.now() })); } catch (e) {}
-        toast(sp === "0" ? "Opening at tip-off…" : "Opening live…");
+        toast(sp === "tip" ? "Opening at tip-off…" : sp === "0" ? "Opening from the start…" : "Opening live…");
         btn.click();
       }, cardIsLive(btn));
       holder.insertAdjacentElement("afterend", row);
     }
+    // The enlarged game pop-up (click a card without hovering first): put
+    // Watch / From start / From tip-off (/ Live) in one full-width row.
+    for (const btn of document.querySelectorAll("button[data-segfix]")) layoutModal(btn);
+    // Live games: the site's "Watch Now" button reads "Watch Live".
+    for (const btn of document.querySelectorAll("button[data-segfix]")) {
+      if (!cardIsLive(btn)) continue;
+      const walker = document.createTreeWalker(btn, NodeFilter.SHOW_TEXT);
+      let tn;
+      while ((tn = walker.nextNode())) {
+        if (/^\s*watch now\s*$/i.test(tn.nodeValue)) tn.nodeValue = tn.nodeValue.replace(/watch now/i, "Watch Live");
+      }
+    }
     // LIVE badges can appear after the buttons were added: keep Live in sync.
     for (const row of document.querySelectorAll(".segfix-starts:not(.segfix-starts-top)")) {
-      const main = row.previousElementSibling && row.previousElementSibling.querySelector("button[data-segfix]");
+      const main = row.parentElement.querySelector(":scope > button[data-segfix]") ||
+        (row.previousElementSibling && row.previousElementSibling.querySelector("button[data-segfix]"));
       if (main) setLiveButton(row, cardIsLive(main));
     }
   }
@@ -785,7 +901,7 @@
   }
 
   // Which ESPN game is this? (teams from the page, date from the stream)
-  const pbp = { key: null, loading: false, windows: [], sport: null, hockey: false, tipReal: null, fetched: 0, eventId: null };
+  const pbp = { key: null, loading: false, windows: [], plays: [], sport: null, hockey: false, tipReal: null, fetched: 0, eventId: null };
   function currentMatchup() {
     const slug = gameSlug();
     if (slug) { const m = parseMatchup(slug); if (m) return m; }
@@ -824,6 +940,8 @@
       const j = await r.json();
       const plays = j.plays || [];
       pbp.windows = pbpWindows(plays, m.hockey);
+      // Live-action plays (real time), for "replay last play".
+      pbp.plays = playMoments(plays, m.hockey);
       const first = plays.find((pl) => pl.wallclock && (m.hockey ? /face ?off/i.test(pl.type.text) : true));
       pbp.tipReal = first ? Date.parse(first.wallclock) / 1000 : null;
       calibrate();
@@ -1005,6 +1123,60 @@
   actions.h = () => skipHalftime();
   actions.D = () => toggleDiag(); // Shift+D
 
+  // Group play-by-play events into "moments": a shot plus its rebound, a foul plus
+  // its free-throw setup, or anything logged within 2 seconds of each other.
+  function playMoments(plays, hockey) {
+    const dead = hockey ? /stoppage|period (start|end)|game end/i : NBA_DEAD;
+    const ev = plays
+      .filter((pl) => pl.wallclock && !dead.test(pl.type.text))
+      .map((pl) => ({ t: Date.parse(pl.wallclock) / 1000, type: pl.type.text }));
+    const out = [];
+    for (const e of ev) {
+      const last = out[out.length - 1];
+      const followUp = /rebound/i.test(e.type) && last && e.t - last.end <= 6;
+      if (last && (e.t - last.end <= 2 || followUp)) { last.end = e.t; continue; }
+      out.push({ t: e.t, end: e.t, type: e.type });
+    }
+    return out;
+  }
+
+  // ---- ↓ "What just happened?": jump back to the start of the last play ----
+  // Plays are logged when they happen (the shot, the foul...). The action that
+  // led to it starts around the previous logged play, so we land just before that.
+  // Press again within a few seconds to go back one more play.
+  let replayChain = { idx: null, at: 0 };
+  function lastPlayIndex(now, d) {
+    let idx = -1;
+    for (let i = 0; i < pbp.plays.length; i++) { if (pbp.plays[i].t + d <= now - 2) idx = i; else break; }
+    return idx;
+  }
+  function replayStart(idx, d) {
+    const play = pbp.plays[idx].t + d;
+    const prevEnd = idx > 0 ? pbp.plays[idx - 1].end + d : null;
+    let start = prevEnd != null ? prevEnd - 1 : play - 12;
+    start = Math.max(start, play - 14);   // never more than 14s before the play
+    start = Math.min(start, play - 6);    // always at least 6s of build-up
+    return start;
+  }
+  function replayLastPlay() {
+    const now = epochNow();
+    if (now == null || !pbp.plays.length) {
+      // No play-by-play (e.g. G League): just go back 10 seconds.
+      q('[aria-label="Rewind 10 Seconds"]')?.click();
+      toast(ICONS.back + "10", "left");
+      return;
+    }
+    const d = streamDelay(pbp.sport);
+    const again = replayChain.idx != null && Date.now() - replayChain.at < 6000;
+    const idx = again ? replayChain.idx - 1 : lastPlayIndex(now, d);
+    if (idx < 0) { toast("No earlier play"); return; }
+    if (seekEpoch(replayStart(idx, d))) {
+      replayChain = { idx, at: Date.now() };
+      toast(again ? "↺ One more play back" : "↺ Last play", "left");
+    }
+  }
+  actions.ArrowDown = () => replayLastPlay();
+
   function decorateControls() {
     const fwd = q('[aria-label="Forward 10 Seconds"]');
     if (!fwd || fwd.parentElement.querySelector(".segfix-skipbreak")) return;
@@ -1018,24 +1190,158 @@
     fwd.parentElement.insertBefore(b, vol || fwd.nextSibling);
   }
 
+  // ---- Start chooser: every time a game is opened -------------------------
+  // Pauses and shows a matchup intro card with two big choices:
+  // Start at tip-off / Start live (on replays: Keep watching).
+  let chooserFor = null;
+  function chooserOpen() { return !!document.getElementById("segfix-chooser"); }
+  function closeChooser(play) {
+    const el = document.getElementById("segfix-chooser");
+    if (el) { el.classList.add("closing"); setTimeout(() => el.remove(), 250); }
+    if (play) { uncoverPlayer(); try { bmPlayer().play(); } catch (e) {} }
+  }
+  async function chooseStart(action) {
+    if (action === "resume") {
+      closeChooser(false);
+      uncoverPlayer();
+      try { const p = bmPlayer(); if (p.isMuted()) p.unmute(); if (p.getVolume() < 5) p.setVolume(60); p.play(); } catch (e) {}
+      return;
+    }
+    coverPlayer("");                 // cover first, so nothing shows as the card fades
+    closeChooser(false);
+    await coveredJump(action);
+  }
+  const escHtml = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  async function fillChooserMatchup(el) {
+    const info = currentMatchup();
+    const box = el.querySelector(".ch-matchup");
+    if (!info) {
+      const t = playerProps().title;
+      if (t) box.innerHTML = `<div class="ch-plain">${escHtml(t)}</div>`;
+      return;
+    }
+    try {
+      const [away, home] = await Promise.all(info.teams.map((t) => teamRecord(info.sport, t.abbr, info.date, info.hockey)));
+      const logo = (t) => t.logo ? `<img src="${escHtml(t.logo.replace("/500/", "/500-dark/"))}" data-fallback="${escHtml(t.logo)}" alt="">` : "";
+      const team = (t, side) =>
+        `<div class="ch-team ${side}">${logo(t)}<b>${escHtml(t.name)}</b><i>${escHtml(t.rec.replace(/-/g, "–"))}</i></div>`;
+      el.style.setProperty("--away", away.color);
+      el.style.setProperty("--home", home.color);
+      box.innerHTML = team(away, "away") + '<div class="ch-at">AT</div>' + team(home, "home");
+      box.querySelectorAll("img").forEach((img) => img.addEventListener("error", () => {
+        if (img.dataset.fallback && img.src !== img.dataset.fallback) img.src = img.dataset.fallback; else img.remove();
+      }));
+      el.classList.add("has-teams");
+    } catch (e) {}
+  }
+  let earlyCovered = null, earlyCoveredAt = 0;
+  function maybeStartChooser() {
+    if (!WATCH_RE.test(location.pathname)) { closeChooser(false); chooserFor = null; earlyCovered = null; return; }
+    if (chooserOpen()) { try { const p = bmPlayer(); if (p && !p.isPaused()) p.pause(); } catch (e) {} return; }
+    const decided = (chooserFor || "").startsWith(location.pathname + "|");
+    // Cover the video the moment a game page opens, so the old spot never shows.
+    if (earlyCovered !== location.pathname && !(chooserFor || "").startsWith(location.pathname + "|")) {
+      if (coverPlayer("")) { earlyCovered = location.pathname; earlyCoveredAt = Date.now(); }
+    }
+    // No video after 15s (e.g. a game that hasn't started): don't leave the cover up.
+    if (earlyCovered === location.pathname && !decided && !playerReady() && Date.now() - earlyCoveredAt > 15000) { uncoverPlayer(); return; }
+    // Keep it paused only until the chooser has been shown for this game.
+    if (earlyCovered === location.pathname && !decided && !chooserOpen()) { try { const p = bmPlayer(); if (p && !p.isPaused()) p.pause(); } catch (e) {} }
+    if (!playerReady()) return;
+    const key = location.pathname + "|" + (playerProps().videoId || "");
+    if (chooserFor === key) return;            // already asked for this game visit
+    chooserFor = key;
+    try { if (sessionStorage.getItem(PENDING_KEY)) return; } catch (e) {} // a card button already chose (it uncovers itself)
+    const host = document.getElementById("videoPlayer") || document.getElementById("primaryViewer");
+    if (!host) { uncoverPlayer(); return; }
+    try { bmPlayer().pause(); } catch (e) {}
+    const live = isLiveNow();
+    const el = document.createElement("div");
+    el.id = "segfix-chooser";
+    el.innerHTML =
+      '<div class="ch-glow away"></div><div class="ch-glow home"></div>' +
+      '<div class="ch-card">' +
+        '<div class="ch-matchup"></div>' +
+        '<div class="ch-q">How do you want to watch?</div>' +
+        '<div class="ch-btns' + (live ? " three" : "") + '">' +
+          '<button type="button" class="ch-btn" data-a="start"><span class="ch-ic"><svg viewBox="0 0 24 24"><path d="M5 5h2.5v14H5zM19.5 6.2v11.6a1 1 0 0 1-1.55.83L9.5 12.83a1 1 0 0 1 0-1.66l8.45-5.8a1 1 0 0 1 1.55.83z"/></svg></span><span class="ch-tx"><b>From the beginning</b><small>Includes the pregame</small></span></button>' +
+          '<button type="button" class="ch-btn primary" data-a="tip"><span class="ch-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 12h17M12 3.5v17M6 5.8c2.6 3.2 2.6 9.2 0 12.4M18 5.8c-2.6 3.2-2.6 9.2 0 12.4" stroke="currentColor" stroke-width="1.6" fill="none"/></svg></span><span class="ch-tx"><b>At tip-off</b><small>Skip the pregame</small></span></button>' +
+          (live ? '<button type="button" class="ch-btn" data-a="live"><span class="ch-ic"><span class="live-dot"></span></span><span class="ch-tx"><b>Watch live</b><small>Jump in right now</small></span></button>' : "") +
+        "</div>" +
+        '<button type="button" class="ch-link" data-a="resume">or keep watching from here</button>' +
+        '<div class="ch-hint"><kbd>Enter</kbd> tip-off <span>·</span> <kbd>Esc</kbd> close</div>' +
+      "</div>";
+    el.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-a]");
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      chooseStart(b.dataset.a);
+    });
+    host.appendChild(el);
+    fillChooserMatchup(el);
+  }
+  setInterval(maybeStartChooser, 200);
+  // The game pop-up animates open; re-check its layout until it settles.
+  setInterval(() => { for (const btn of document.querySelectorAll("button[data-segfix]")) layoutModal(btn); }, 500);
+
+  // ---- Close SEG+'s "end cards" carousel (suggested videos) automatically ----
+  function closeEndCards() {
+    if (!WATCH_RE.test(location.pathname)) return;
+    const root = document.getElementById("app-wrapper");
+    if (!root || !root._vnode) return;
+    const seen = new Set(); const stack = [root._vnode];
+    while (stack.length) {
+      const vn = stack.pop(); if (!vn || typeof vn !== "object") continue;
+      const c = vn.component;
+      if (c && !seen.has(c)) {
+        seen.add(c);
+        if ((c.type.__name || c.type.name) === "EndCardCarousel" && c.isMounted && !c.isUnmounted) {
+          const close = c.vnode.props && (c.vnode.props.onClose || c.vnode.props.onSelectionMade);
+          try { if (close) close(); } catch (e) {}
+          if (c.subTree && c.subTree.el && c.subTree.el.style) c.subTree.el.style.display = "none";
+        }
+        stack.push(c.subTree);
+      }
+      if (Array.isArray(vn.children)) for (const ch of vn.children) stack.push(ch);
+      if (vn.suspense) stack.push(vn.suspense.activeBranch);
+    }
+  }
+  setInterval(closeEndCards, 700);
+
+  // ---- Never start muted ----------------------------------------------------
+  // Browsers sometimes make players start muted. Once per game visit, as soon as
+  // it's playing (and you've clicked something, which browsers require), unmute.
+  let unmutedFor = null;
+  function ensureSound() {
+    const p = bmPlayer();
+    if (!p || !WATCH_RE.test(location.pathname)) return;
+    const key = location.pathname + "|" + (playerProps().videoId || "");
+    if (unmutedFor === key) return;
+    try {
+      if (p.isPaused()) return;
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+      if (p.isMuted()) p.unmute();
+      if (p.getVolume() < 5) p.setVolume(60);
+      if (!p.isMuted()) unmutedFor = key;
+    } catch (e) {}
+  }
+  setInterval(ensureSound, 700);
+
   // ---- Run on every page change -------------------------------------------
   let scheduled = false;
   const onDomChange = () => {
     if (scheduled) return;
     scheduled = true;
-    requestAnimationFrame(() => {
+    // A plain timer (not requestAnimationFrame) so it also runs in background tabs.
+    setTimeout(() => {
       scheduled = false;
-      installGuard();
-      decorateCards();
-      decorateWatchPage();
-      runPendingStart();
-      decorateRecords();
-      decorateControls();
-      dismissStillWatching();
-    });
+      for (const fn of [installGuard, decorateCards, decorateWatchPage, runPendingStart, decorateRecords, decorateControls, dismissStillWatching]) {
+        try { fn(); } catch (e) {}  // one failing step never blocks the others
+      }
+    }, 60);
   };
   new MutationObserver(onDomChange).observe(document.documentElement, { childList: true, subtree: true });
   onDomChange();
 
-  if (document.body && !window.__segfixQuiet) toast('<span class="live-dot" style="background:#7c4dff;box-shadow:0 0 10px #7c4dff"></span>SEG+ extras on');
 })();
