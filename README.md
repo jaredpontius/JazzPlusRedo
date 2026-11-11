@@ -17,41 +17,16 @@ like normal, and it's just... better. No settings. No account. No nonsense.
 
 ## ✨ What it does
 
-**⏭️ Skips commercials. With one button.**
-When an ad break starts, a big *Skip commercial* button pops up. Press it (or just hit
-**Enter** or **→**) and *poof*, you're back at the game. One smooth jump, no
-fast-forward guessing.
+- ⏭️ **Skips commercials** with one press (or hit **Enter**). Poof, back to the game.
+- 🦓 **Skips ref reviews** too, often. Bye, four-minute monitor huddles.
+- 🥱 **Skips halftime** with **H**. Intermissions too, hockey fans.
+- ⏮️ **From start = tip-off**, not 30 minutes of pregame.
+- 📺 **Fullscreen that stays fullscreen.** No more shrinking video.
+- 🏀 **A real scoreboard** with logos and records. Very purple.
+- 🧹 **Zero clutter.** No spoiler chat, pop-ups, or sponsor banners.
+- 😴 **Never asks "Are you still watching?"** Yes. Yes we are.
 
-**🦓 Skips ref reviews, too (often).**
-You know when the refs huddle around a monitor for four minutes to decide whose foot
-touched the line? It often catches those long coach's-challenge and replay-review
-stoppages and lets you skip right past them. You're welcome.
-
-**🥱 Skips halftime.**
-Halftime show? Hit **H** and jump straight to the second-half tip. (Hockey fans: it skips
-intermissions too.)
-
-**⏮️ "From start" actually means the start.**
-It takes you to **tip-off**, not 30 minutes of pregame. And a **Live** button shows up
-whenever you're behind a live game and want to catch up.
-
-**📺 Fullscreen that stays fullscreen.**
-The video doesn't shrink every time you move your mouse anymore. The cursor hides itself.
-Controls look clean.
-
-**🏀 A real scoreboard at the top.**
-Both team logos plus current records, styled like a TV broadcast. Very fancy. Very purple.
-
-**🧹 All the clutter, gone.**
-No live chat (aka the spoiler machine). No fan-react videos. No feedback pop-ups. No
-sponsor banners. No language pill. No CC button.
-
-**😴 Never asks "Are you still watching?"**
-Yes. Yes we are. It answers for you.
-
-**⌨️ Keyboard shortcuts for the couch:**
-Space = play/pause · ← / → = 10 seconds · **S** = skip commercial · **H** = skip halftime ·
-**G** = go live · **M** = mute · **F** = fullscreen
+**Shortcuts:** Space play/pause · ←/→ 10s · **S** skip · **H** halftime · **G** live · **M** mute · **F** fullscreen
 
 ---
 
