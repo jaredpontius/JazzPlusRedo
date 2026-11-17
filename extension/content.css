@@ -1,5 +1,5 @@
 /* ==========================================================================
-   JazzPlusRedo — "Jazz Night" theme
+   SEG+ Better Player — "Jazz Night" theme
    ========================================================================== */
 
 html {
@@ -662,306 +662,6 @@ button[aria-label="Subtitles"] {
 }
 
 /* --------------------------------------------------------------------------
-   12. Start chooser: matchup intro card, every time a game opens
-   -------------------------------------------------------------------------- */
-
-@property --ch-spin { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
-
-#segfix-chooser {
-  --away: #7c4dff;
-  --home: #ffc83d;
-  position: absolute;
-  inset: 0;
-  z-index: 20000;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background: rgba(5, 3, 12, 0.72);
-  backdrop-filter: blur(10px) saturate(130%);
-  -webkit-backdrop-filter: blur(10px) saturate(130%);
-  animation: ch-fade 0.4s var(--sf-ease) both;
-}
-#segfix-chooser.closing { animation: ch-out 0.25s ease both; }
-@keyframes ch-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes ch-out { to { opacity: 0; transform: scale(1.02); } }
-
-/* Team-color glows on each side */
-#segfix-chooser .ch-glow {
-  position: absolute;
-  top: -20%;
-  width: 70%;
-  height: 140%;
-  filter: blur(70px);
-  opacity: 0.55;
-  pointer-events: none;
-  animation: ch-breathe 6s ease-in-out infinite alternate;
-}
-#segfix-chooser .ch-glow.away { left: -25%; background: radial-gradient(closest-side, var(--away), transparent); }
-#segfix-chooser .ch-glow.home { right: -25%; background: radial-gradient(closest-side, var(--home), transparent); animation-delay: -3s; }
-@keyframes ch-breathe { from { opacity: 0.38; transform: scale(0.95); } to { opacity: 0.62; transform: scale(1.05); } }
-
-/* The card, with a slowly spinning purple-gold border */
-#segfix-chooser .ch-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  width: min(86%, 640px);
-  padding: 30px 30px 22px;
-  border-radius: 26px;
-  /* Solid dark card, with a slowly spinning purple-gold border drawn only on the edge */
-  border: 2px solid transparent;
-  background:
-    linear-gradient(180deg, #1e1438, #0d0919) padding-box,
-    conic-gradient(from var(--ch-spin), var(--sf-purple), #b06bff, var(--sf-gold), #b06bff, var(--sf-purple)) border-box;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6), 0 0 60px rgba(124, 77, 255, 0.25);
-  animation: ch-rise 0.55s var(--sf-ease) both 0.05s, ch-spin 6s linear infinite;
-}
-@keyframes ch-spin { to { --ch-spin: 360deg; } }
-@keyframes ch-rise { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: none; } }
-
-/* Matchup row */
-#segfix-chooser .ch-matchup {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 18px;
-  width: 100%;
-  min-height: 10px;
-}
-#segfix-chooser .ch-team {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: #fff;
-  font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-#segfix-chooser .ch-team.away { animation: ch-in-left 0.6s var(--sf-ease) both 0.15s; }
-#segfix-chooser .ch-team.home { animation: ch-in-right 0.6s var(--sf-ease) both 0.15s; }
-@keyframes ch-in-left { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
-@keyframes ch-in-right { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
-#segfix-chooser .ch-team img {
-  width: clamp(54px, 7vw, 84px);
-  height: clamp(54px, 7vw, 84px);
-  object-fit: contain;
-  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.6));
-}
-#segfix-chooser .ch-team b {
-  font-weight: 900;
-  font-size: clamp(16px, 1.7vw, 22px);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-#segfix-chooser .ch-team i {
-  font-style: normal;
-  font-weight: 600;
-  font-size: 12.5px;
-  letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.6);
-  font-variant-numeric: tabular-nums;
-}
-#segfix-chooser .ch-at {
-  font: 800 12px/1 system-ui, -apple-system, sans-serif;
-  letter-spacing: 0.3em;
-  color: rgba(255, 255, 255, 0.45);
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-}
-#segfix-chooser .ch-plain {
-  grid-column: 1 / -1;
-  text-align: center;
-  color: #fff;
-  font: 800 clamp(16px, 1.8vw, 22px)/1.2 system-ui, -apple-system, sans-serif;
-}
-#segfix-chooser .ch-q {
-  color: rgba(255, 255, 255, 0.78);
-  font: 600 14px/1 system-ui, -apple-system, sans-serif;
-  letter-spacing: 0.04em;
-}
-
-/* The two big buttons */
-#segfix-chooser .ch-btns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  width: 100%;
-}
-@media (max-width: 520px) { #segfix-chooser .ch-btns { grid-template-columns: 1fr; } }
-#segfix-chooser .ch-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-  transition: transform 0.22s var(--sf-ease), background-color 0.22s, border-color 0.22s, box-shadow 0.22s;
-  animation: ch-rise 0.55s var(--sf-ease) both 0.25s;
-}
-#segfix-chooser .ch-btn:nth-child(2) { animation-delay: 0.32s; }
-#segfix-chooser .ch-btn:hover {
-  transform: translateY(-3px);
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-}
-#segfix-chooser .ch-btn.primary {
-  background: linear-gradient(110deg, var(--sf-purple), #b06bff 55%, var(--sf-gold));
-  border-color: rgba(255, 255, 255, 0.28);
-  color: #140a2a;
-  box-shadow: 0 14px 40px rgba(124, 77, 255, 0.45);
-}
-/* Light sweep across the primary button */
-#segfix-chooser .ch-btn.primary::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.45) 50%, transparent 70%);
-  transform: translateX(-120%);
-  animation: ch-sheen 3.2s ease-in-out infinite 1s;
-}
-@keyframes ch-sheen { 0%, 60% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
-#segfix-chooser .ch-ic {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.18);
-}
-#segfix-chooser .ch-btn:not(.primary) .ch-ic { background: rgba(255, 255, 255, 0.08); }
-#segfix-chooser .ch-ic svg { width: 22px; height: 22px; fill: currentColor; }
-#segfix-chooser .ch-ic .live-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #ff3b5c;
-  box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.7);
-  animation: ch-pulse 1.6s ease-out infinite;
-}
-@keyframes ch-pulse { to { box-shadow: 0 0 0 12px rgba(255, 59, 92, 0); } }
-#segfix-chooser .ch-tx { display: flex; flex-direction: column; gap: 5px; }
-#segfix-chooser .ch-tx b { font: 800 clamp(16px, 1.5vw, 19px)/1.1 system-ui, -apple-system, sans-serif; }
-#segfix-chooser .ch-tx small { font: 600 12.5px/1.2 system-ui, -apple-system, sans-serif; opacity: 0.72; }
-
-#segfix-chooser .ch-hint {
-  color: rgba(255, 255, 255, 0.45);
-  font: 500 12px/1 system-ui, -apple-system, sans-serif;
-}
-#segfix-chooser .ch-hint span { margin: 0 6px; }
-#segfix-chooser .ch-hint kbd {
-  padding: 2px 7px;
-  border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  font: 700 11px/1 ui-monospace, Menlo, monospace;
-  color: rgba(255, 255, 255, 0.85);
-}
-#segfix-chooser .ch-link {
-  margin-top: -6px;
-  padding: 4px 8px;
-  border: 0;
-  background: none;
-  color: rgba(255, 255, 255, 0.6);
-  font: 600 13px/1 system-ui, -apple-system, sans-serif;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-color: rgba(255, 255, 255, 0.3);
-  cursor: pointer;
-}
-#segfix-chooser .ch-link:hover { color: #fff; text-decoration-color: rgba(255, 255, 255, 0.8); }
-
-/* Remove the gift / trailer / info buttons next to Watch / Resume */
-button[data-segfix] ~ * {
-  display: none !important;
-}
-
-/* Intro card: three choices on live games (beginning · tip-off · live) */
-#segfix-chooser .ch-card:has(.ch-btns.three) {
-  width: min(92%, 860px);
-}
-#segfix-chooser .ch-btns.three {
-  grid-template-columns: 1fr 1fr 1fr;
-}
-/* Smaller windows: keep buttons side by side, just more compact */
-@media (max-width: 1000px) {
-  #segfix-chooser .ch-card { gap: 14px; padding: 20px 18px 16px; }
-  #segfix-chooser .ch-team img { width: 46px; height: 46px; }
-  #segfix-chooser .ch-btn { padding: 12px 12px; gap: 10px; }
-  #segfix-chooser .ch-ic { width: 34px; height: 34px; border-radius: 10px; }
-  #segfix-chooser .ch-tx small { display: none; }
-  #segfix-chooser .ch-hint { display: none; }
-}
-@media (max-width: 520px) {
-  #segfix-chooser .ch-btns.three { grid-template-columns: 1fr; }
-  #segfix-chooser .ch-q, #segfix-chooser .ch-team i { display: none; }
-}
-#segfix-chooser .ch-btn:nth-child(3) { animation-delay: 0.39s; }
-
-/* Game cards & the enlarged game window: Watch / Resume spans the full width,
-   and From start / From tip-off (/ Live) split the row below it evenly. */
-div:has(> button[data-segfix]) {
-  width: 100% !important;
-  max-width: none !important;
-}
-div:has(> button[data-segfix]) > button[data-segfix] {
-  flex: 1 1 auto !important;
-  width: 100% !important;
-  max-width: none !important;
-  justify-content: center !important;
-  margin: 0 !important;
-}
-.segfix-starts {
-  margin-top: 10px;
-  gap: 10px;
-}
-.segfix-starts button {
-  min-height: 44px;
-  font-size: 15px;
-  border-radius: 999px;
-}
-/* Don't hide our own row if it ever sits beside the Watch button */
-button[data-segfix] ~ .segfix-starts {
-  display: flex !important;
-}
-
-/* Enlarged game pop-up: one full-width row
-   [ Watch Now ][ From start ][ From tip-off ][ Live? ] */
-.segfix-modal-row {
-  display: grid !important;
-  grid-auto-flow: column !important;
-  grid-template-columns: 1.35fr !important;
-  grid-auto-columns: 1fr !important;
-  gap: 12px !important;
-  width: 100% !important;
-  align-items: stretch !important;
-}
-.segfix-modal-row > * { margin: 0 !important; }
-.segfix-modal-row > button[data-segfix] {
-  min-height: 58px !important;
-  font-size: 18px !important;
-}
-.segfix-starts.segfix-in-modal {
-  display: contents !important;
-}
-.segfix-starts.segfix-in-modal button {
-  min-height: 58px;
-  font-size: 17px;
-}
-@media (max-width: 700px) {
-  .segfix-modal-row { grid-auto-flow: row !important; grid-template-columns: 1fr 1fr !important; }
-  .segfix-modal-row > button[data-segfix] { grid-column: 1 / -1; }
-}
-
-/* --------------------------------------------------------------------------
    13. Cover while jumping to tip-off / start / live (no spoilers, no flashes)
    -------------------------------------------------------------------------- */
 
@@ -997,10 +697,7 @@ button[data-segfix] ~ .segfix-starts {
 }
 #segfix-cover .cv-label:empty { display: none; }
 
-/* The intro card sits on a solid background: nothing behind it shows through */
-#segfix-chooser {
-  background: #07040f !important;
-}
+
 
 /* --------------------------------------------------------------------------
    14. Player controls centered at the bottom (keeps the score area clear)
@@ -1040,3 +737,467 @@ button[data-segfix] ~ .segfix-starts {
 
 /* Skip break no longer lives in the bar: the pop-up handles it */
 .segfix-skipbreak { display: none !important; }
+
+/* Volume: fixed footprint; the slider floats out to the right, so showing /
+   hiding it (hover, mute) never shifts the centered controls */
+.player-controls .left-side > .volume-controls {
+  position: relative !important;
+  width: 32px !important;
+  flex: 0 0 32px !important;
+}
+.player-controls .left-side > .volume-controls > div {
+  position: absolute !important;
+  left: calc(100% + 10px) !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 96px !important;
+  margin: 0 !important;
+}
+
+/* --------------------------------------------------------------------------
+   15. Skip pop-up: inside the video, right side, above the controls & menus
+   -------------------------------------------------------------------------- */
+
+#segfix-skipbox {
+  position: absolute !important;
+  right: 28px !important;
+  bottom: 30% !important;
+  top: auto !important;
+  left: auto !important;
+  z-index: 10001 !important;
+}
+.segfix-skipbtn.main {
+  position: relative;
+  overflow: hidden;
+  gap: 12px;
+  padding: 14px 18px 16px 22px;
+  border-radius: 16px;
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(24, 16, 44, 0.86), rgba(10, 6, 22, 0.92)) padding-box,
+    linear-gradient(120deg, var(--sf-purple), #b06bff 55%, var(--sf-gold)) border-box;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #fff;
+  font: 800 17px/1 system-ui, -apple-system, sans-serif;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 30px rgba(124, 77, 255, 0.35);
+}
+.segfix-skipbtn.main:hover {
+  filter: none;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 44px rgba(255, 200, 61, 0.35);
+}
+.segfix-skipbtn.main svg {
+  width: 18px;
+  height: 18px;
+  color: var(--sf-gold);
+}
+.segfix-skipbtn.main .left {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font: 700 13px/1 ui-monospace, Menlo, monospace;
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+.segfix-skipbtn.main .left:empty { display: none; }
+/* progress line across the bottom: how much of the break has passed */
+.segfix-skipbtn.main .prog {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: var(--done, 0%);
+  background: linear-gradient(90deg, var(--sf-purple), #b06bff 60%, var(--sf-gold));
+  transition: width 0.5s linear;
+}
+.segfix-skipbtn.main.muted {
+  background:
+    linear-gradient(180deg, rgba(24, 16, 44, 0.86), rgba(10, 6, 22, 0.92)) padding-box,
+    linear-gradient(120deg, var(--sf-purple), #b06bff 55%, var(--sf-gold)) border-box;
+  color: #fff;
+}
+@media (max-width: 700px) {
+  #segfix-skipbox { right: 14px !important; bottom: 26% !important; }
+  .segfix-skipbtn.main { font-size: 15px; padding: 11px 14px 13px 16px; }
+}
+
+/* --------------------------------------------------------------------------
+   12. Start chooser — compact, restrained dialog
+       "Choose your starting point": beginning · tip-off · live
+   -------------------------------------------------------------------------- */
+
+#segfix-chooser {
+  --ch-bg: #141416;
+  --ch-line: rgba(255, 255, 255, 0.08);
+  --ch-text: #f2f2f4;
+  --ch-dim: rgba(242, 242, 244, 0.56);
+  --ch-faint: rgba(242, 242, 244, 0.36);
+  --ch-accent: #7c4dff;
+  position: absolute;
+  inset: 0;
+  z-index: 20000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.94);   /* opaque: nothing from the video shows through */
+  font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  animation: ch-in 0.22s ease-out both;
+}
+#segfix-chooser.closing { animation: ch-out 0.16s ease-in both; }
+@keyframes ch-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ch-out { to { opacity: 0; } }
+
+#segfix-chooser .ch-card {
+  width: min(440px, 100%);
+  border-radius: 14px;
+  background: var(--ch-bg);
+  border: 1px solid var(--ch-line);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  color: var(--ch-text);
+  overflow: hidden;
+  animation: ch-card-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes ch-card-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+/* Header: eyebrow + one-line matchup */
+#segfix-chooser .ch-top {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--ch-line);
+}
+#segfix-chooser .ch-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--ch-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#segfix-chooser .ch-eyebrow .ch-date:not(:empty)::before { content: "·"; margin-right: 8px; }
+#segfix-chooser .ch-live { color: #ff453a; display: inline-flex; align-items: center; gap: 6px; }
+#segfix-chooser .ch-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff453a;
+}
+#segfix-chooser .ch-matchup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 24px;
+}
+#segfix-chooser .ch-team { display: inline-flex; align-items: center; gap: 8px; }
+#segfix-chooser .ch-team img { width: 24px; height: 24px; object-fit: contain; }
+#segfix-chooser .ch-team .nm { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+#segfix-chooser .ch-team .rec { font-size: 13px; color: var(--ch-faint); font-variant-numeric: tabular-nums; }
+#segfix-chooser .ch-at { color: var(--ch-faint); font-size: 13px; }
+#segfix-chooser .ch-plain { font-size: 15px; font-weight: 600; }
+
+/* Heading */
+#segfix-chooser .ch-h {
+  margin: 0;
+  padding: 18px 22px 8px;
+  color: var(--ch-text);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+/* Options list */
+#segfix-chooser .ch-list { padding: 4px 10px 8px; }
+#segfix-chooser .ch-opt {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ch-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+#segfix-chooser .ch-opt + .ch-opt::before {
+  content: "";
+  position: absolute;
+  left: 56px;
+  right: 12px;
+  top: 0;
+  height: 1px;
+  background: var(--ch-line);
+}
+#segfix-chooser .ch-opt.sel { background: rgba(255, 255, 255, 0.06); }
+#segfix-chooser .ch-opt.sel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--ch-accent);
+}
+#segfix-chooser .ch-opt.sel + .ch-opt::before,
+#segfix-chooser .ch-opt.sel::before { opacity: 0; }
+#segfix-chooser .ch-opt .ic {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--ch-dim);
+}
+#segfix-chooser .ch-opt.sel .ic { color: var(--ch-text); }
+#segfix-chooser .ch-opt .ic svg { width: 18px; height: 18px; fill: currentColor; }
+#segfix-chooser .ch-opt .tx { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+#segfix-chooser .ch-opt .t { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+#segfix-chooser .ch-opt .s { font-size: 12.5px; color: var(--ch-dim); }
+#segfix-chooser .ch-opt .k {
+  color: var(--ch-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+#segfix-chooser .ch-opt .k:empty { display: none; }
+
+/* Footer */
+#segfix-chooser .ch-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 22px 14px;
+  border-top: 1px solid var(--ch-line);
+}
+#segfix-chooser .ch-continue {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ch-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+#segfix-chooser .ch-continue:hover { color: var(--ch-text); }
+#segfix-chooser .ch-keys { color: var(--ch-faint); font-size: 11.5px; white-space: nowrap; }
+#segfix-chooser .ch-keys kbd {
+  display: inline-block;
+  min-width: 18px;
+  margin: 0 2px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--ch-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ch-dim);
+  font: 600 10.5px/1.5 -apple-system, system-ui, sans-serif;
+  text-align: center;
+}
+@media (max-width: 520px) {
+  #segfix-chooser .ch-keys { display: none; }
+}
+
+#segfix-chooser .ch-matchup:empty { display: none; }
+#segfix-chooser .ch-top:has(.ch-matchup:empty) .ch-eyebrow { margin-bottom: 0; }
+
+
+/* --------------------------------------------------------------------------
+   16. Watch-mode picker (control bar + start chooser), same look as the dialog
+   -------------------------------------------------------------------------- */
+
+#segfix-chooser .ch-card { overflow: visible; }
+
+.segfix-mode {
+  --m-bg: #141416;
+  --m-line: rgba(255, 255, 255, 0.08);
+  --m-text: #f2f2f4;
+  --m-dim: rgba(242, 242, 244, 0.56);
+  --m-faint: rgba(242, 242, 244, 0.36);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+}
+.segfix-mode .mode-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 8px 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--m-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--m-dim);
+  font: 600 12.5px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+.segfix-mode .mode-trigger:hover,
+.segfix-mode.open .mode-trigger { color: var(--m-text); background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.14); }
+.segfix-mode.on .mode-trigger { color: var(--m-text); }
+.segfix-mode .mi svg { width: 14px; height: 14px; fill: currentColor; display: block; }
+.segfix-mode.on .mi { color: #a98bff; }
+.segfix-mode .mc svg { width: 14px; height: 14px; display: block; opacity: 0.7; transition: transform 0.15s; }
+.segfix-mode.open .mc svg { transform: rotate(180deg); }
+
+.segfix-mode .mode-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  width: 280px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--m-bg);
+  border: 1px solid var(--m-line);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.14s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 10002;
+}
+.segfix-mode.in-bar .mode-menu { right: 0; }
+.segfix-mode.in-chooser .mode-menu { left: -6px; }
+.segfix-mode.open .mode-menu { opacity: 1; transform: none; pointer-events: auto; }
+.segfix-mode .mode-head {
+  padding: 8px 10px 6px;
+  color: var(--m-faint);
+  font: 600 10.5px/1 -apple-system, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.segfix-mode .mode-opt {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px 1fr 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--m-text);
+  text-align: left;
+  cursor: pointer;
+}
+.segfix-mode .mode-opt:hover { background: rgba(255, 255, 255, 0.05); }
+.segfix-mode .mode-opt.active { background: rgba(255, 255, 255, 0.06); }
+.segfix-mode .mode-opt.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  background: #7c4dff;
+}
+.segfix-mode .mode-opt .oi { display: grid; place-items: center; color: var(--m-dim); }
+.segfix-mode .mode-opt.active .oi { color: var(--m-text); }
+.segfix-mode .mode-opt .oi svg { width: 16px; height: 16px; fill: currentColor; }
+.segfix-mode .mode-opt .mt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.segfix-mode .mode-opt .t { font: 600 13.5px/1.15 -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
+.segfix-mode .mode-opt .s { font: 400 12px/1.25 -apple-system, system-ui, sans-serif; color: var(--m-dim); }
+.segfix-mode .mode-opt .ck { color: var(--m-text); font-size: 12px; font-weight: 700; visibility: hidden; }
+.segfix-mode .mode-opt.active .ck { visibility: visible; }
+
+/* In the control bar: same picker, a touch smaller */
+.segfix-mode.in-bar { margin-right: 10px; }
+.segfix-mode.in-bar .mode-trigger { height: 28px; background: rgba(0, 0, 0, 0.25); }
+@media (max-width: 760px) { .segfix-mode.in-bar .ml { display: none; } }
+
+/* The "Enter" hint follows the highlighted row */
+#segfix-chooser .ch-opt .k { visibility: hidden; }
+#segfix-chooser .ch-opt.sel .k { visibility: visible; }
+
+/* Start card footer: just "Continue from current position" */
+#segfix-chooser .ch-foot { justify-content: flex-start; }
+/* Scoreboard without records: names centered vertically */
+.segfix-matchup .sb-name { justify-content: center; }
+
+/* Start card: centered, slightly larger matchup */
+#segfix-chooser .ch-top { text-align: center; padding: 20px 22px 18px; }
+#segfix-chooser .ch-eyebrow { justify-content: center; margin-bottom: 14px; }
+#segfix-chooser .ch-matchup { justify-content: center; gap: 18px; min-height: 36px; }
+#segfix-chooser .ch-team { gap: 10px; }
+#segfix-chooser .ch-team img { width: 36px; height: 36px; }
+#segfix-chooser .ch-team .nm { font-size: 19px; font-weight: 650; letter-spacing: -0.015em; }
+#segfix-chooser .ch-at { font-size: 14px; }
+
+/* --------------------------------------------------------------------------
+   Phone remote (touch screens, e.g. AirPlaying from iPhone Safari)
+   -------------------------------------------------------------------------- */
+#segfix-remote {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 2147483000;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 14px;
+  background: linear-gradient(180deg, rgba(20, 12, 40, 0.92), rgba(10, 6, 22, 0.98));
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px 22px 0 0;
+  color: #fff;
+  font: 600 15px/1.2 system-ui, -apple-system, sans-serif;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html.segfix-phone body { padding-bottom: 300px; }
+/* The in-video Skip pill is replaced by the big one in the remote. */
+html.segfix-phone #segfix-skipbox { display: none; }
+#segfix-remote button {
+  font: inherit; color: inherit; border: 0; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+#segfix-remote svg { width: 26px; height: 26px; fill: currentColor; }
+#segfix-remote .r-top { display: flex; align-items: center; justify-content: space-between; }
+#segfix-remote .r-where { color: #b9add6; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+#segfix-remote.on-tv .r-where { color: #fff; }
+#segfix-remote .r-where .dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 10px #3ddc84; }
+#segfix-remote .r-air {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.1);
+}
+#segfix-remote .r-air svg { width: 20px; height: 20px; }
+#segfix-remote.on-tv .r-air { background: rgba(61, 220, 132, 0.18); color: #3ddc84; }
+#segfix-remote .r-skip {
+  display: none; position: relative; overflow: hidden;
+  align-items: center; justify-content: center; gap: 10px;
+  min-height: 64px; border-radius: 18px;
+  background: linear-gradient(90deg, var(--sf-purple), #b06bff 60%, var(--sf-gold));
+  color: #120a26; font-size: 20px; font-weight: 800;
+  box-shadow: 0 0 30px rgba(124, 77, 255, 0.45);
+}
+#segfix-remote .r-skip.show { display: flex; }
+#segfix-remote .r-skip::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 4px;
+  width: var(--done, 0%); background: rgba(18, 10, 38, 0.55);
+}
+#segfix-remote .r-skip .left { font-variant-numeric: tabular-nums; opacity: 0.7; font-weight: 700; font-size: 16px; }
+#segfix-remote .r-pad { display: flex; align-items: center; justify-content: space-around; }
+#segfix-remote .r-btn {
+  width: 72px; height: 72px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.1);
+}
+#segfix-remote .r-btn:active, #segfix-remote .r-row button:active, #segfix-remote .r-skip:active { transform: scale(0.94); }
+#segfix-remote .r-btn svg { width: 34px; height: 34px; }
+#segfix-remote .r-play { width: 88px; height: 88px; background: #fff; color: #120a26; }
+#segfix-remote .r-play svg { width: 40px; height: 40px; }
+#segfix-remote .r-row { display: flex; gap: 10px; }
+#segfix-remote .r-row button {
+  flex: 1; min-height: 46px; border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+#segfix-remote .r-row button.hide { display: none; }
+#segfix-remote .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff3b5c; }

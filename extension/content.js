@@ -1,15 +1,27 @@
-// JazzPlusRedo — extras: keyboard shortcuts + idle cursor hiding.
+// SEG+ Better Player — extras: keyboard shortcuts + idle cursor hiding.
 // All the visual changes live in content.css; this file is optional.
 (() => {
-  if (window.__segfixLoaded) return;
+  // ---- Takeover: when the add-on updates, the newest copy in a tab wins -----
+  // Every timer and handler below checks it still belongs to the current copy,
+  // so an older copy left running in an open tab goes quiet on its own.
+  const SEGFIX_ID = Math.random().toString(36).slice(2);
+  window.__segfixToken = SEGFIX_ID;
   window.__segfixLoaded = true;
+  const alive = () => window.__segfixToken === SEGFIX_ID;
+  const setInterval = (fn, ms) => window.setInterval(() => { if (alive()) fn(); }, ms);
+  const onDoc = (type, fn, opts) => document.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
+  const onWin = (type, fn, opts) => window.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
+  // Clear anything an older copy left on the page.
+  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
+  for (const el of document.querySelectorAll("[data-segfix]")) delete el.dataset.segfix;
+  for (const el of document.querySelectorAll(".segfix-modal-row")) el.classList.remove("segfix-modal-row");
 
   const root = document.documentElement;
   const IDLE_MS = 2500;
   let idleTimer = null;
 
   // ---- Idle cursor (CSS only hides it while fullscreen) ------------------
-  document.addEventListener(
+  onDoc(
     "mousemove",
     () => {
       root.classList.remove("segfix-idle");
@@ -40,8 +52,7 @@
     const layer = overlayLayer();
     if (el.parentElement !== layer) layer.appendChild(el);
   }
-  document.addEventListener("fullscreenchange", () => {
-    keepInLayer(document.getElementById("segfix-skipbox"));
+  onDoc("fullscreenchange", () => {
     keepInLayer(document.getElementById("segfix-toast"));
   });
 
@@ -81,6 +92,17 @@
     }
   }
 
+  // Double-click the picture to go fullscreen / back (like YouTube).
+  onDoc("dblclick", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element) || !t.closest("#videoPlayer, #primaryViewer")) return;
+    if (t.closest("button, a, input, select, [role=slider], [role=menu], .player-controls .py-1\\.5, .right-side, .left-side, [class*=progress], [class*=seek], [class*=scrub], #segfix-chooser, #segfix-skipbox, .segfix-mode")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+    toggleFullscreen();
+  }, true);
+
   const actions = {
     " ": () => {
       const b = q(".play-pause-btn");
@@ -105,7 +127,7 @@
     g: () => { const b = findLiveButton(); if (b) { b.click(); toast('<span class="live-dot"></span>LIVE'); } },
   };
 
-  document.addEventListener(
+  onDoc(
     "keydown",
     (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -114,10 +136,13 @@
       if (!document.getElementById("primaryViewer")) return;
       const key = e.shiftKey && /^d$/i.test(e.key) ? "D" : e.key.length === 1 ? e.key.toLowerCase() : e.key;
       const fn = actions[key === " " ? " " : key];
-      if (chooserOpen() && (key === "Enter" || key === "Escape")) {
+      if (chooserOpen() && (key === "Enter" || key === "Escape" || key === "ArrowUp" || key === "ArrowDown")) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (key === "Enter") chooseStart("tip"); else closeChooser(true);
+        if (key === "ArrowUp") chooserMove(-1);
+        else if (key === "ArrowDown") chooserMove(1);
+        else if (key === "Enter") chooseStart(chooserSelected());
+        else closeChooser(true);
         return;
       }
       if (!fn) return;
@@ -178,7 +203,9 @@
   function goTipOff() {
     const tip = gameStartEpoch();
     if (bmPlayer() && tip != null && seekEpoch(tip - TIP_LEAD)) return true;
-    toast("Tip-off time not known, starting from the beginning");
+    // No tip-off time (game hasn't tipped yet, or no play-by-play): a live game
+    // that hasn't started -> live is right before tip-off; otherwise the start.
+    if (isLiveNow()) return goLive();
     return goFromStart();
   }
   function goLive() {
@@ -218,15 +245,36 @@
     try {
       if (p.isLive()) {
         const liveEdge = p.getCurrentTime() - p.getTimeShift();
-        if (action === "tip") { const tip = gameStartEpoch(); if (tip != null) return tip - TIP_LEAD; }
-        if (action === "tip" || action === "start") return liveEdge + p.getMaxTimeShift() + 1;
+        if (action === "tip") { const tip = gameStartEpoch(); return tip != null ? tip - TIP_LEAD : liveEdge; }
+        if (action === "start") return liveEdge + p.getMaxTimeShift() + 1;
         if (action === "live") return liveEdge;
       } else {
-        if (action === "tip") { const tip = gameStartEpoch(); if (tip != null && mediaEpoch0) return tip - TIP_LEAD - mediaEpoch0; }
+        if (action === "tip") { const tip = gameStartEpoch(); const at = tip != null ? playbackFromEpoch(tip - TIP_LEAD, false) : null; if (at != null) return at; }
         if (action === "tip" || action === "start") return 0;
       }
     } catch (e) {}
     return null;
+  }
+  // Start playback and make sure it stays playing (SEG+'s own UI can lag
+  // behind or re-pause): press its play button if needed, for up to ~4s.
+  async function ensurePlaying() {
+    let playing = 0;
+    for (let i = 0; i < 16 && playing < 6; i++) {
+      const p = bmPlayer();
+      let paused = true;
+      try { paused = p.isPaused(); } catch (e) {}
+      if (!paused) playing++;
+      else {
+        playing = 0;
+        const b = q(".play-pause-btn");
+        if (b && b.getAttribute("aria-label") === "Play") b.click();
+        else {
+          try { await p.play(); }
+          catch (e) { try { await document.querySelector("#primaryViewer video")?.play(); } catch (_) {} }
+        }
+      }
+      await sleep(250);
+    }
   }
   // Pause, jump, wait until the picture is really at the target, then reveal + play.
   async function coveredJump(action) {
@@ -235,7 +283,7 @@
     const p = bmPlayer();
     try { if (p.isMuted()) p.unmute(); if (p.getVolume() < 5) p.setVolume(60); } catch (e) {}
     try { p.pause(); } catch (e) {}
-    if (action === "tip") for (let i = 0; i < 16 && gameStartEpoch() == null; i++) await sleep(400); // give play-by-play a moment
+    if (action === "tip") for (let i = 0; i < 30 && gameStartEpoch() == null; i++) await sleep(400); // up to 12s for play-by-play
     const ok = action === "tip" ? goTipOff() : action === "start" ? goFromStart() : action === "live" ? goLive() : true;
     const target = targetFor(action);
     const v = document.querySelector("#primaryViewer video");
@@ -249,6 +297,7 @@
     try { await bmPlayer().play(); } catch (e) {}
     await sleep(350);                        // let the first frames paint
     uncoverPlayer();
+    ensurePlaying();
   }
 
   // After opening a game from a card, wait until the player is ready, then go.
@@ -503,12 +552,12 @@
       const team = (t, side) =>
         `<div class="sb-team ${side}" style="--tc:${esc(t.color)}">` +
           `<span class="sb-logo">${t.logo ? `<img src="${esc(t.logo.replace("/500/", "/500-dark/"))}" data-fallback="${esc(t.logo)}" alt="">` : ""}</span>` +
-          `<span class="sb-name"><b>${esc(t.name)}</b><i>${rec(t)}</i></span>` +
+          `<span class="sb-name"><b>${esc(t.name)}</b></span>` +
         `</div>`;
       const el = document.createElement("div");
       el.className = "segfix-matchup";
       el.dataset.slug = slug;
-      el.title = "Current season records";
+      el.title = "";
       el.style.setProperty("--away", away.color);
       el.style.setProperty("--home", home.color);
       el.innerHTML = team(away, "away") + `<div class="sb-vs">AT</div>` + team(home, "home");
@@ -596,7 +645,8 @@
     const head = text.slice(0, 200);
     if (/\.m3u8|\.mpd/i.test(url) || head.startsWith("#EXTM3U") || head.includes("<MPD")) {
       diag.manifests++;
-      if (text.includes("<MPD")) { diag.lastMpd = text.length < 3e6 ? text : text.slice(0, 3e6); parseScte(text); }
+      if (text.includes("<MPD")) { diag.lastMpd = text.length < 3e6 ? text : text.slice(0, 3e6); onPlayerManifest(url, text); }
+      else if (head.startsWith("#EXTM3U") && text.includes("#EXTINF")) onPlayerPlaylist(url, text);
       diag.lastManifestUrl = url.split("?")[0].slice(-80);
       const cues = text.match(CUE_RE);
       if (cues) {
@@ -611,56 +661,355 @@
       diag.adJson = diag.adJson.slice(-3);
     }
   }
-  // SCTE-35 events from the DASH manifest, as absolute times (same clock as the player).
-  let scte = [];
-  let mediaEpoch0 = null;   // real-world time of playback position 0 (replays)
+  // =========================================================================
+  //  STREAM TIMELINE: one clock for everything
+  //  Every game segment (DASH Period) carries the broadcast clock in its video
+  //  timestamps (presentationTimeOffset / timescale, seconds since 1970). That
+  //  holds for live streams, finished recordings and ad-stitched streams, so
+  //  break times are kept on that clock ("stream time") and converted to the
+  //  player's own position per segment, never with one global offset.
+  //  Inserted-ad Periods carry no stamp: they sit where the game stopped.
+  // =========================================================================
+  const isoDur = (d) => {
+    const m = /PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?/.exec(d || "");
+    return m ? (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0) : 0;
+  };
+  // Our own requests use the untouched fetch and are remembered, so they can
+  // never be mistaken for the player's manifest.
+  const rawFetch = window.fetch.bind(window);
+  const ownUrls = new Set();
+  function ownFetch(url) { ownUrls.add(url); return rawFetch(url); }
+  // The raw broadcast-origin path (/media/<recording>/...) is only ever
+  // fetched by us (any copy of this script); the player uses /v1/dash/ or archive-.
+  const isOwnManifest = (url) => ownUrls.has(url) || /^https:\/\/video-[a-z0-9-]+\.kiswe\.com\/media\//.test(String(url));
+  const recIdOf = (url) => (String(url || "").match(/\/media\/(kiswe_[A-Za-z0-9_]+)\//) || [])[1] || null;
+  // Parse an MPD into: segments [{rel, epoch, ad}] (rel = position in this
+  // manifest's own timeline), exact breaks [{start, end|null}] on the stream
+  // clock, and whether it's a finished recording.
+  function parseManifest(xml) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    const mpd = doc.documentElement;
+    if (!mpd || !/mpd/i.test(mpd.localName || "") || doc.getElementsByTagName("parsererror").length) return null;
+    const isStatic = mpd.getAttribute("type") === "static";
+    const ast = isStatic ? 0 : Date.parse(mpd.getAttribute("availabilityStartTime") || "1970-01-01T00:00:00Z") / 1000;
+    const isAd = (pe) => /_\d+$/.test(pe.getAttribute("id") || "") ||
+      [...pe.getElementsByTagNameNS("*", "BaseURL")].some((bu) => /\/dashsegment\//.test(bu.textContent || ""));
+    const stamp = (pe) => {
+      for (const as of pe.getElementsByTagNameNS("*", "AdaptationSet")) {
+        if (!/video/.test(as.getAttribute("contentType") || as.getAttribute("mimeType") || "")) continue;
+        for (const st of as.getElementsByTagNameNS("*", "SegmentTemplate")) {
+          if (st.hasAttribute("presentationTimeOffset")) return +st.getAttribute("presentationTimeOffset") / +(st.getAttribute("timescale") || 1);
+        }
+      }
+      return null;
+    };
+    const segs = [], events = [];
+    let anchor = null;   // last stamped segment {rel, epoch}
+    for (const pe of doc.getElementsByTagNameNS("*", "Period")) {
+      const rel = (isStatic ? 0 : ast) + isoDur(pe.getAttribute("start"));
+      const ad = isAd(pe);
+      const s = ad ? null : stamp(pe);
+      // Live manifests: position == stream clock. Recordings: use the stamp.
+      const epoch = !isStatic ? rel : s != null ? s : anchor ? anchor.epoch + (rel - anchor.rel) : null;
+      if (!ad && epoch != null) anchor = { rel, epoch };
+      segs.push({ rel, epoch, ad, id: pe.getAttribute("id") || "" });
+      if (ad || epoch == null) continue;
+      for (const es of pe.getElementsByTagNameNS("*", "EventStream")) {
+        if (!/scte35/i.test(es.getAttribute("schemeIdUri") || "")) continue;
+        const ts = +(es.getAttribute("timescale") || 1);
+        const pto = +(es.getAttribute("presentationTimeOffset") || 0);
+        for (const ev of es.getElementsByTagNameNS("*", "Event")) {
+          const ins = ev.getElementsByTagNameNS("*", "SpliceInsert")[0];
+          if (!ins || ins.getAttribute("spliceEventCancelIndicator") === "true") continue;
+          const pt = +(ev.getAttribute("presentationTime") || 0);
+          const off = (pt - pto) / ts;
+          if (!(off >= -1 && off < 86400)) continue;          // stamps on another clock: ignore
+          events.push({ at: epoch + off, out: ins.getAttribute("outOfNetworkIndicator") === "true",
+            dur: ev.hasAttribute("duration") ? +ev.getAttribute("duration") / ts : null });
+        }
+      }
+    }
+    // Breaks: marker pairs (out -> in) and runs of inserted-ad segments.
+    const raw = [];
+    events.sort((a, b) => a.at - b.at);
+    let open = null;
+    for (const e of events) {
+      if (e.out) { if (open == null) open = e.at; }
+      else if (open != null) { raw.push({ start: open, end: e.at }); open = null; }
+    }
+    // A finished recording that ends inside a break: the break ends with it.
+    let recEnd = null;
+    if (isStatic && anchor) {
+      // Prefer the last segment's own duration (the overall length isn't
+      // always consistent with the segment starts).
+      const pes = doc.getElementsByTagNameNS("*", "Period"), lastPe = pes[pes.length - 1], last = segs[segs.length - 1];
+      if (lastPe && lastPe.hasAttribute("duration") && last.epoch != null) recEnd = last.epoch + isoDur(lastPe.getAttribute("duration"));
+      else recEnd = anchor.epoch + (isoDur(mpd.getAttribute("mediaPresentationDuration")) - anchor.rel);
+    }
+    if (open != null) raw.push({ start: open, end: recEnd != null && recEnd > open ? recEnd : null });
+    for (let i = 0; i < segs.length; i++) {
+      if (!segs[i].ad) continue;
+      let j = i;
+      while (j + 1 < segs.length && segs[j + 1].ad) j++;
+      const prev = segs.slice(0, i).reverse().find((x) => !x.ad && x.epoch != null);
+      let start = prev ? prev.epoch + (segs[i].rel - prev.rel) : null;
+      // The splicer starts its ads at the next segment boundary, 2-4s into the
+      // break; the ad segment's id ("<epoch>_<n>") holds the real break start.
+      const idAt = +((segs[i].id || "").match(/^(\d{9,11})_\d+$/) || [])[1];
+      if (start != null && idAt && idAt <= start && start - idAt < 10 && (!prev || idAt >= prev.epoch)) start = idAt;
+      const next = segs[j + 1];
+      if (start != null) raw.push({ start, end: next && next.epoch != null ? next.epoch : recEnd });
+      i = j;
+    }
+    return { isStatic, segs, breaks: mergeBreaks(raw) };
+  }
+  // Sort, join overlapping / back-to-back pieces (< 2s apart), drop nonsense.
+  function mergeBreaks(list) {
+    const out = [];
+    for (const b of list.filter((x) => x && isFinite(x.start)).sort((x, y) => x.start - y.start)) {
+      const last = out[out.length - 1];
+      if (last && (last.end == null || b.start <= last.end + 2)) {
+        last.end = last.end == null || b.end == null ? null : Math.max(last.end, b.end);
+      } else out.push({ start: b.start, end: b.end });
+    }
+    return out.filter((b) => b.end == null || (b.end - b.start >= 5 && b.end - b.start <= 1200));
+  }
+
+  // ---- The player's own manifest -----------------------------------------
+  const tl = { url: "", recId: null, isStatic: false, segs: [], liveBreaks: [], liveShift: 0 };
+  let mediaEpoch0 = null;   // stream clock at playback position 0 (recordings)
   let mpdIsStatic = false;
-  function parseScte(xml) {
+  let scte = [];            // kept for the diagnostics panel
+  function onPlayerManifest(url, xml) {
+    if (isOwnManifest(url)) return;
+    let r = null;
+    try { r = parseManifest(xml); } catch (e) {}
+    if (!r || !r.segs.length) return;
+    const rec = recIdOf(url);
+    if (rec && rec !== tl.recId) { tl.liveBreaks = []; }      // a different recording
+    tl.url = url; tl.recId = rec || tl.recId; tl.isStatic = r.isStatic; tl.segs = r.segs;
+    tl.liveShift = 0; hlsState.url = "";            // DASH is the player's stream: it always wins
+    mpdIsStatic = r.isStatic;
+    mediaEpoch0 = r.isStatic && r.segs[0].epoch != null ? r.segs[0].epoch - r.segs[0].rel : null;
+    if (!r.isStatic) {
+      // Live: keep breaks that rolled out of the manifest window.
+      tl.liveBreaks = mergeBreaks(tl.liveBreaks.filter((b) => b.end != null).concat(r.breaks));
+      learnOrigin(url);
+    }
+    scte = r.breaks.map((b) => ({ at: b.start, out: "true", dur: b.end != null ? b.end - b.start : null }));
+    if (r.isStatic && tl.recId) loadOriginBreaks(tl.recId);
+  }
+  // Player position <-> stream clock, segment by segment.
+  function epochFromPlayback(t, live) {
+    if (live) return t + (tl.liveShift || 0);
+    let seg = null;
+    for (const s of tl.segs) { if (s.rel <= t + 1e-6) seg = s; else break; }
+    if (!seg || seg.ad || seg.epoch == null) return null;
+    return seg.epoch + (t - seg.rel);
+  }
+  function playbackFromEpoch(e, live) {
+    if (live) return e - (tl.liveShift || 0);
+    for (let i = 0; i < tl.segs.length; i++) {
+      const s = tl.segs[i], n = tl.segs[i + 1];
+      if (s.ad || s.epoch == null) continue;
+      const len = n ? n.rel - s.rel : Infinity;
+      if (e >= s.epoch - 0.01 && e < s.epoch + len) return s.rel + (e - s.epoch);
+    }
+    return null;
+  }
+
+  // Which manifest is the player using right now? (watch every .mpd request)
+  let lastMpdSeen = "";
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) if (/\.mpd(\?|$)/.test(e.name) && !isOwnManifest(e.name)) lastMpdSeen = e.name;
+    }).observe({ type: "resource", buffered: true });
+  } catch (e) {}
+  const noQuery = (u) => String(u || "").split("?")[0];
+  // Switching games: forget the old clock at once (never map with a stale one).
+  let tlPath = location.pathname;
+  function resetTimeline() {
+    tl.url = ""; tl.recId = null; tl.isStatic = false; tl.segs = []; tl.liveBreaks = []; tl.liveShift = 0; hlsState.url = ""; hlsState.next = 0;
+    mediaEpoch0 = null; mpdIsStatic = false; scte = [];
+  }
+  // If the player's manifest isn't the one we parsed (or we missed it, e.g. it
+  // loaded before this script), fetch it ourselves.
+  let manifestFetching = false;
+  setInterval(async () => {
+    if (location.pathname !== tlPath) { tlPath = location.pathname; resetTimeline(); }
+    if (!WATCH_RE.test(location.pathname) || manifestFetching || !bmPlayer() || !lastMpdSeen) return;
+    if (noQuery(lastMpdSeen) === noQuery(tl.url) && tl.segs.length) return;
+    manifestFetching = true;
     try {
-      const doc = new DOMParser().parseFromString(xml, "application/xml");
-      const mpd = doc.documentElement;
-      const ast = Date.parse(mpd.getAttribute("availabilityStartTime") || "1970-01-01T00:00:00Z") / 1000;
-      const iso = (d) => { const m = /PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?/.exec(d || ""); return m ? (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0) : 0; };
-      const out = [];
-      for (const period of doc.getElementsByTagNameNS("*", "Period")) {
-        const pStart = iso(period.getAttribute("start"));
-        for (const es of period.getElementsByTagNameNS("*", "EventStream")) {
-          if (!/scte35/i.test(es.getAttribute("schemeIdUri") || "")) continue;
-          const ts = +(es.getAttribute("timescale") || 1);
-          const pto = +(es.getAttribute("presentationTimeOffset") || 0);
-          for (const ev of es.getElementsByTagNameNS("*", "Event")) {
-            const pt = +(ev.getAttribute("presentationTime") || 0);
-            const dur = ev.hasAttribute("duration") ? +ev.getAttribute("duration") / ts : null;
-            const at = ast + pStart + (pt - pto) / ts;
-            const insert = ev.getElementsByTagNameNS("*", "SpliceInsert")[0];
-            const seg = ev.getElementsByTagNameNS("*", "SegmentationDescriptor")[0];
-            const bd = ev.getElementsByTagNameNS("*", "BreakDuration")[0];
-            out.push({
-              at, dur,
-              out: insert ? insert.getAttribute("outOfNetworkIndicator") : null,
-              segType: seg ? seg.getAttribute("segmentationTypeId") : null,
-              segDur: seg && seg.getAttribute("segmentationDuration") ? +seg.getAttribute("segmentationDuration") / 90000 : null,
-              breakDur: bd ? +bd.getAttribute("duration") / 90000 : null,
-              id: ev.getAttribute("id"),
-            });
-          }
-        }
-      }
-      if (out.length) scte = out.sort((a, b) => a.at - b.at);
-      // Real-world time at playback position 0 (the video's own timestamps).
-      mediaEpoch0 = null;
-      for (const as of doc.getElementsByTagNameNS("*", "AdaptationSet")) {
-        const isVideo = (as.getAttribute("contentType") || as.getAttribute("mimeType") || "").includes("video");
-        if (!isVideo) continue;
-        const st = as.getElementsByTagNameNS("*", "SegmentTemplate")[0];
-        if (st && st.getAttribute("presentationTimeOffset")) {
-          mediaEpoch0 = +st.getAttribute("presentationTimeOffset") / +(st.getAttribute("timescale") || 1);
-          break;
-        }
-      }
-      mpdIsStatic = mpd.getAttribute("type") === "static";
+      const url = lastMpdSeen;
+      const r = await rawFetch(url);
+      if (r.ok && url === lastMpdSeen) onPlayerManifest(url, await r.text());
+    } catch (e) {} finally { manifestFetching = false; }
+  }, 1500);
+
+  // ---- Replays: the broadcast's original manifest (exact markers) --------
+  // The live origin keeps a finished game's full manifest for about a day.
+  // Fetch it once when a replay opens, and save the breaks for good.
+  const ORIGINS_KEY = "segfix-origins";
+  function learnOrigin(url) {
+    const host = (String(url).match(/^https:\/\/(video-[a-z0-9-]+\.kiswe\.com)\//) || [])[1];
+    if (!host) return;
+    try {
+      const list = JSON.parse(localStorage.getItem(ORIGINS_KEY) || "[]");
+      if (!list.includes(host)) localStorage.setItem(ORIGINS_KEY, JSON.stringify([host, ...list].slice(0, 6)));
     } catch (e) {}
   }
+  function originHosts() {
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(ORIGINS_KEY) || "[]"); } catch (e) {}
+    return [...new Set([...list, "video-jazz.kiswe.com", "video-mammoth.kiswe.com"])];
+  }
+  const originTried = new Set();
+  async function loadOriginBreaks(recId) {
+    if (originTried.has(recId)) return;
+    originTried.add(recId);
+    const saved = readSaved(SAVE_PREFIX + "rec:" + recId);
+    if (saved && saved.source === "origin") return;          // already have the complete list
+    const file = (tl.url.match(/\/([^/?]+\.mpd)/) || [])[1] || "mix-stream1.mpd";
+    for (const host of originHosts()) {
+      try {
+        const r = await ownFetch(`https://${host}/media/${recId}/${file}`);
+        if (!r.ok) continue;
+        const res = parseManifest(await r.text());
+        const closed = res ? res.breaks.filter((b) => b.end != null) : [];
+        if (!res || !res.isStatic || !closed.length) continue;
+        writeSaved([SAVE_PREFIX + "rec:" + recId], closed, "origin");
+        return;
+      } catch (e) {}
+    }
+  }
+
+
+  // =========================================================================
+  //  HLS (Safari on iPhone / iPad, and AirPlay): the player plays an HLS
+  //  stream instead of DASH. Each content segment carries the wall clock
+  //  (#EXT-X-PROGRAM-DATE-TIME), which runs exactly 22s behind the DASH
+  //  broadcast clock (measured on several games), so everything is mapped
+  //  onto the same stream clock and the break engine works unchanged.
+  //  Inserted ads are segments with no clock of their own.
+  // =========================================================================
+  const HLS_CLOCK_SHIFT = 22;
+  const hlsState = { url: "", next: 0, variant: "" };
+  const absUrl = (u, base) => { try { return new URL(u, base).href; } catch (e) { return u; } };
+  function parsePlaylist(text) {
+    const lines = text.split(/\r?\n/);
+    const segs = [], events = [];
+    let pos = 0, pdt = null, groupNew = true, anchor = null, dur = 0, isStatic = false, uriAd = false;
+    const isAdUri = (u) => /\/segment\/|dashsegment|\/ads?\/|tm-|-ad-/i.test(u);
+    const epochAt = (at) => (anchor ? anchor.epoch + (at - anchor.rel) : null);
+    for (const raw of lines) {
+      const ln = raw.trim();
+      if (!ln) continue;
+      if (ln.startsWith("#EXT-X-ENDLIST")) isStatic = true;
+      else if (ln.startsWith("#EXT-X-PLAYLIST-TYPE:VOD")) isStatic = true;
+      else if (ln.startsWith("#EXT-X-DISCONTINUITY") && !ln.startsWith("#EXT-X-DISCONTINUITY-SEQUENCE")) groupNew = true;
+      else if (ln.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) {
+        const t = Date.parse(ln.slice(25));
+        if (isFinite(t)) pdt = t / 1000 + HLS_CLOCK_SHIFT;
+      } else if (ln.startsWith("#EXTINF:")) dur = parseFloat(ln.slice(8)) || 0;
+      else if (/^#EXT-X-CUE-OUT(?!-CONT)/.test(ln)) {
+        const d = parseFloat((ln.match(/DURATION=([\d.]+)/i) || ln.match(/CUE-OUT:([\d.]+)/) || [])[1]);
+        events.push({ rel: pos, out: true, dur: isFinite(d) ? d : null });
+      } else if (ln.startsWith("#EXT-X-CUE-IN")) events.push({ rel: pos, out: false });
+      else if (ln.startsWith("#EXT-X-DATERANGE") && /SCTE35-OUT|SCTE35-IN|CUE/i.test(ln)) {
+        const st = Date.parse((ln.match(/START-DATE="([^"]+)"/) || [])[1] || "");
+        const d = parseFloat((ln.match(/(?:PLANNED-)?DURATION=([\d.]+)/) || [])[1]);
+        if (isFinite(st)) events.push({ at: st / 1000 + HLS_CLOCK_SHIFT, out: !/SCTE35-IN/.test(ln), dur: isFinite(d) ? d : null });
+      } else if (!ln.startsWith("#")) {
+        const ad = isAdUri(ln) || (groupNew && pdt == null && uriAd);
+        if (pdt != null && !isAdUri(ln)) {
+          const ep = pdt;
+          // Only start a new piece when the clock jumps (or after a discontinuity).
+          const expect = epochAt(pos);
+          if (groupNew || !anchor || expect == null || Math.abs(expect - ep) > 0.5 || segs[segs.length - 1].ad) {
+            segs.push({ rel: pos, epoch: ep, ad: false, id: "" });
+          }
+          anchor = { rel: pos, epoch: ep };
+        } else if (groupNew || !segs.length || !segs[segs.length - 1].ad !== !ad) {
+          segs.push({ rel: pos, epoch: ad ? null : epochAt(pos), ad, id: "" });
+        }
+        uriAd = true;
+        groupNew = false; pdt = null;
+        pos += dur; dur = 0;
+      }
+    }
+    // Markers -> breaks on the stream clock (a marker's time comes from the
+    // content piece it sits in, or the one just before an ad).
+    const epochAtRel = (r) => {
+      let best = null;
+      for (const sg of segs) if (sg.rel <= r + 1e-6 && !sg.ad && sg.epoch != null) best = sg;
+      return best ? best.epoch + (r - best.rel) : null;
+    };
+    const raw = [];
+    let open = null;
+    for (const e of events) {
+      const at = e.at != null ? e.at : epochAtRel(e.rel);
+      if (at == null) continue;
+      if (e.out) { if (e.dur) raw.push({ start: at, end: at + e.dur }); else if (open == null) open = at; }
+      else if (open != null) { raw.push({ start: open, end: at }); open = null; }
+    }
+    if (open != null) raw.push({ start: open, end: null });
+    for (let i = 0; i < segs.length; i++) {
+      if (!segs[i].ad) continue;
+      let j = i;
+      while (j + 1 < segs.length && segs[j + 1].ad) j++;
+      const prev = segs.slice(0, i).reverse().find((x) => !x.ad && x.epoch != null);
+      const next = segs[j + 1];
+      if (prev) raw.push({ start: prev.epoch + (segs[i].rel - prev.rel), end: next && next.epoch != null ? next.epoch : null });
+      i = j;
+    }
+    return { isStatic, segs, breaks: mergeBreaks(raw), length: pos };
+  }
+  function onPlayerPlaylist(url, text) {
+    let r = null;
+    try { r = parsePlaylist(text); } catch (e) {}
+    if (!r || !r.segs.some((s) => s.epoch != null)) return;
+    const rec = recIdOf(url) || recIdOf(hlsState.url);
+    if (rec && rec !== tl.recId) tl.liveBreaks = [];
+    tl.url = hlsState.url || url; tl.recId = rec || tl.recId; tl.isStatic = r.isStatic; tl.segs = r.segs;
+    tl.liveShift = HLS_CLOCK_SHIFT;
+    mpdIsStatic = r.isStatic;
+    const first = r.segs.find((s) => s.epoch != null);
+    mediaEpoch0 = r.isStatic && first ? first.epoch - first.rel : null;
+    if (!r.isStatic) tl.liveBreaks = mergeBreaks(tl.liveBreaks.filter((b) => b.end != null).concat(r.breaks));
+    scte = r.breaks.map((b) => ({ at: b.start, out: "true", dur: b.end != null ? b.end - b.start : null }));
+    diag.hls = { segs: r.segs.length, ads: r.segs.filter((s) => s.ad).length, breaks: r.breaks.length, static: r.isStatic };
+    if (tl.recId) loadOriginBreaks(tl.recId);
+  }
+  // The player tells us which HLS stream it plays; read it ourselves
+  // (Safari's own video engine fetches it, so the hooks never see it).
+  async function pollHls() {
+    const p = bmPlayer();
+    let src = null;
+    try { src = p && p.getSource && p.getSource(); } catch (e) {}
+    const url = src && src.hls;
+    if (!url || lastMpdSeen || diag.lastMpd) return;      // the player is on DASH: nothing to do here
+    const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    if (src.dash && !appleTouch && !isHlsPlaying()) return;
+    if (url !== hlsState.url) { hlsState.url = url; hlsState.variant = ""; hlsState.next = 0; }
+    if (Date.now() < hlsState.next) return;
+    hlsState.next = Date.now() + (tl.isStatic && tl.segs.length ? 600000 : 6000);
+    try {
+      if (!hlsState.variant) {
+        const m = await (await ownFetch(url)).text();
+        if (m.includes("#EXTINF")) { hlsState.variant = url; onPlayerPlaylist(url, m); return; }
+        const v = m.split(/\r?\n/).find((l) => l && !l.startsWith("#"));
+        if (!v) return;
+        hlsState.variant = absUrl(v.trim(), url);
+      }
+      onPlayerPlaylist(hlsState.variant, await (await ownFetch(hlsState.variant)).text());
+    } catch (e) {}
+  }
+  function isHlsPlaying() {
+    const v = document.querySelector("#primaryViewer video");
+    return !!(v && /\.m3u8/i.test(v.currentSrc || v.src || ""));
+  }
+  setInterval(pollHls, 2000);
 
   (function hookNetwork() {
     const XO = XMLHttpRequest.prototype.open;
@@ -691,7 +1040,7 @@
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-  // ---- Diagnostics (Shift+D panel) ---------------------------------------
+  // ---- Diagnostics (Shift+D panel, and the temporary debug link) ---------
   const fmt = (o, n = 300) => { try { return JSON.stringify(o).slice(0, n); } catch (e) { return String(o); } };
   function diagSnapshot() {
     const inst = findPlayerInstance();
@@ -712,12 +1061,18 @@
       liveLabel: !!(typeof playerLiveButton === "function" && playerLiveButton()),
       shortAdClips: adVideos().length,
       manifests: diag.manifests,
+      hls: diag.hls || null,
+      hlsUrl: hlsState.url ? hlsState.url.split("?")[0].slice(-70) : null,
+      onTv: (() => { try { return onTv(); } catch (e) { return null; } })(),
+      epochNow: (() => { try { return epochNow(); } catch (e) { return null; } })(),
+      liveShift: tl.liveShift,
       lastManifest: diag.lastManifestUrl,
       cueCount: diag.cueCount,
       cueSamples: diag.cueSamples,
       adJson: diag.adJson,
       inBreakDecision: inBreak(),
       bmPlayer: !!bmPlayer(),
+      guard: { skips: guardSkips, edgeCovered, exactBreaks: exactBreaks().length },
       halftimeNow: halftimeAt(playheadNow()),
       isLive: (() => { try { return bmPlayer().isLive(); } catch (e) { return null; } })(),
       savedMarkerBreaks: savedMarkerBreaks().length,
@@ -769,9 +1124,36 @@
     el.id = "segfix-diag";
     el.style.cssText = "position:fixed;left:16px;top:80px;z-index:2147483647;max-width:46vw;max-height:70vh;overflow:auto;margin:0;padding:12px 14px;border-radius:10px;background:rgba(0,0,0,.88);color:#b8f7c4;font:12px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;pointer-events:none";
     document.body.appendChild(el);
-    const render = () => { el.textContent = "JazzPlusRedo diagnostics (Shift+D to close)\n" + JSON.stringify(diagSnapshot(), null, 1); };
+    const render = () => { el.textContent = "SEG+ Better Player diagnostics (Shift+D to close)\n" + JSON.stringify(diagSnapshot(), null, 1); };
     render();
     diagTimer = setInterval(render, 500);
+  }
+
+  // Temporary debug link (only in debug builds): the add-on's bridge script
+  // forwards snapshots to a receiver on this Mac and passes test commands back.
+  if (window.__segfixDebug) {
+    const send = (kind, data) => window.postMessage({ __segfixOut: kind, data }, "*");
+    setInterval(() => { if (document.getElementById("primaryViewer")) send("snap", diagSnapshot()); }, 2000);
+    onWin("message", async (e) => {
+      if (e.source !== window || !e.data || !e.data.__segfixCmd) return;
+      const cmd = String(e.data.__segfixCmd);
+      const before = diagSnapshot();
+      let result = "ok";
+      try {
+        if (cmd === "skip") await skipBreak();
+        else if (cmd === "fwd") q('[aria-label="Forward 10 Seconds"]')?.click();
+        else if (cmd === "back") q('[aria-label="Rewind 10 Seconds"]')?.click();
+        else if (cmd === "startover") result = doStart("0");
+        else if (cmd === "live") result = doStart("-1");
+        else if (cmd === "playpause") q(".play-pause-btn")?.click();
+        else if (cmd === "probe") result = deepProbe();
+        else if (cmd === "mpd") { const t = diag.lastMpd || ""; const i = t.indexOf("<EventStream"); result = { head: t.slice(0, 1500), events: i >= 0 ? t.slice(i, i + 6000) : "none" }; }
+        else if (cmd.startsWith("js:")) { const code = atob(cmd.slice(3)); result = await (new Function("ctx", "return (async () => {" + code + "})()"))({ scte, diag, findPlayerInstance, q, skipBreak, doStart, exactBreaks, pbp, tl, epochNow, guardDecision, savedMarkerBreaks, allBreaks }); }
+        else result = "unknown command";
+      } catch (err) { result = "error: " + err; }
+      await sleep(1500);
+      send("cmd", { cmd, result, before, after: diagSnapshot() });
+    });
   }
 
   // =========================================================================
@@ -799,9 +1181,9 @@
     const p = bmPlayer();
     if (!p) return null;
     try {
-      const t = p.getCurrentTime();
-      if (p.isLive()) return t;
-      return mediaEpoch0 ? t + mediaEpoch0 : null;
+      const live = p.isLive();
+      if (!live && (!tl.isStatic || (lastMpdSeen && noQuery(lastMpdSeen) !== noQuery(tl.url)))) return null;   // recording's clock not known yet
+      return epochFromPlayback(p.getCurrentTime(), live);
     } catch (e) { return null; }
   }
   function playheadNow() { return epochNow(); }
@@ -811,29 +1193,40 @@
     if (!p || t == null) return false;
     try {
       if (p.isLive()) p.timeShift(Math.min(0, p.getTimeShift() + (t - p.getCurrentTime())));
-      else if (mediaEpoch0) p.seek(Math.max(0, t - mediaEpoch0));
-      else return false;
+      else {
+        const pos = playbackFromEpoch(t, false);
+        if (pos == null) return false;
+        p.seek(Math.max(0, pos));
+      }
       return true;
     } catch (e) { return false; }
   }
 
-  // ---- Source 1/2: stream markers (live) and saved markers (replays) ------
+  // ---- Exact breaks: live manifest, saved breaks, replay origin ------------
   const SAVE_PREFIX = "segfix-breaks:";
   const gameSlug = () => (location.pathname.match(/^\/events\/([^/]+)\//) || [])[1] || null;
   function playerProps() { const i = findPlayerInstance(); return i ? i.props : {}; }
-  function liveMarkerBreaks() {
-    const out = [];
-    let start = null;
-    for (const e of scte) {
-      if (e.out === "true") { if (start == null) start = e; }
-      else if (e.out === "false" && start != null) { out.push({ start: start.at, end: e.at }); start = null; }
-    }
-    if (start != null && start.dur) out.push({ start: start.at, end: start.at + start.dur });
-    return out;
+  function readSaved(k) {
+    try {
+      const d = JSON.parse(localStorage.getItem(k) || "null");
+      return d && Array.isArray(d.breaks) ? d : null;
+    } catch (e) { return null; }
+  }
+  function writeSaved(keys, breaks, source) {
+    try {
+      let old = null;
+      for (const k of keys) old = old || readSaved(k);
+      if (old && old.source === "origin" && source !== "origin") return;   // never downgrade a complete list
+      const merged = mergeBreaks(((old && old.breaks) || []).map(([a, b]) => ({ start: a, end: b }))
+        .concat(breaks.filter((b) => b.end != null)));
+      const json = JSON.stringify({ breaks: merged.map((b) => [+b.start.toFixed(2), +b.end.toFixed(2)]), source, saved: Date.now() });
+      for (const k of keys) localStorage.setItem(k, json);
+    } catch (e) {}
   }
   function gameKeys() {
     const pr = playerProps();
     const keys = [];
+    if (tl.recId) keys.push(SAVE_PREFIX + "rec:" + tl.recId);      // the recording itself: best key
     const slug = gameSlug();
     if (slug) keys.push(SAVE_PREFIX + slug);
     if (pr.videoId) keys.push(SAVE_PREFIX + "vid:" + pr.videoId);
@@ -841,32 +1234,33 @@
     return keys;
   }
   function saveMarkers() {
-    if (!isLiveNow() || !scte.length) return;
+    if (!isLiveNow() || !tl.liveBreaks.some((b) => b.end != null)) return;
     const keys = gameKeys();
-    if (!keys.length) return;
-    try {
-      let old = null;
-      for (const k of keys) old = old || JSON.parse(localStorage.getItem(k) || "null");
-      const merged = new Map(((old && old.breaks) || []).map((b) => [Math.round(b[0]), b]));
-      for (const b of liveMarkerBreaks()) merged.set(Math.round(b.start), [+b.start.toFixed(2), +b.end.toFixed(2)]);
-      const json = JSON.stringify({ breaks: [...merged.values()].sort((x, y) => x[0] - y[0]), saved: Date.now() });
-      for (const k of keys) localStorage.setItem(k, json);
-    } catch (e) {}
+    if (keys.length) writeSaved(keys, tl.liveBreaks, "live");
   }
   setInterval(saveMarkers, 15000);
+  // Saved breaks for this recording. Each break must sit inside this video
+  // (on the stream clock), so a list saved for another game can't apply.
   function savedMarkerBreaks() {
     const p = bmPlayer();
-    let span = null;
-    try { if (p && mediaEpoch0) span = [mediaEpoch0, mediaEpoch0 + p.getDuration()]; } catch (e) {}
+    if (!p || !tl.segs.length) return [];
+    let dur = 0;
+    try { dur = p.getDuration(); } catch (e) {}
+    const inside = (e) => playbackFromEpoch(e, false) != null && playbackFromEpoch(e, false) <= dur + 1;
     for (const k of gameKeys()) {
-      let d = null;
-      try { d = JSON.parse(localStorage.getItem(k) || "null"); } catch (e) {}
-      if (!d || !d.breaks || !d.breaks.length) continue;
-      // Only trust saved breaks that actually fall inside this replay.
-      if (span && !d.breaks.some(([a]) => a > span[0] && a < span[1])) continue;
-      return d.breaks.map(([a, b]) => ({ start: a, end: b }));
+      const d = readSaved(k);
+      if (!d || !d.breaks.length) continue;
+      const list = d.breaks.map(([a, b]) => ({ start: a, end: b })).filter((b) => inside(b.start) || inside(b.end));
+      if (list.length) return list;
     }
     return [];
+  }
+  function liveMarkerBreaks() { return tl.liveBreaks; }
+  // Every break whose timing is exact (stream clock), for this video.
+  function exactBreaks() {
+    if (isLiveNow()) return tl.liveBreaks.map((b) => ({ start: b.start, end: b.end, closed: b.end != null }));
+    if (!tl.isStatic || mediaEpoch0 == null) return [];        // recording's clock unknown: nothing is exact
+    return savedMarkerBreaks().map((b) => ({ ...b, closed: true }));
   }
 
   // ---- Source 3: play-by-play (works for any NBA / NHL game) --------------
@@ -880,9 +1274,11 @@
   }
   const NBA_DEAD = /substitution|timeout|end period|end of|end game|challenge|replay|review|ejection|delay of game|official|jump ball violation/i;
 
-  // Build break windows (in REAL time) from plays. Tested against real
-  // commercial markers: commercials start ~60-90s after the play that stopped
-  // the game, and the broadcast returns about when the next play is logged.
+  // Estimated break windows (in REAL time) from plays: the commercial starts
+  // ~60-90s after the play that stopped the game, and the broadcast returns
+  // about when the next play is logged. ESTIMATES ONLY (the broadcast delay
+  // varies by tens of seconds between games): they power the manual "Skip to
+  // game" pop-up when no exact timing exists, and never skip on their own.
   function pbpWindows(plays, hockey) {
     const wc = (pl) => Date.parse(pl.wallclock) / 1000;
     const pts = plays.filter((pl) => pl.wallclock);
@@ -929,28 +1325,71 @@
     if (title) return parseMatchup(title, ref ? new Date(ref * 1000) : new Date());
     return null;
   }
-  async function findEspnEvent(m) {
-    const home = m.teams[1];
-    const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${m.sport}/teams/${home.abbr}/schedule`);
-    const j = await r.json();
-    const refMs = (epochNow() || m.date.getTime() / 1000) * 1000;
+  // All of a team's games: regular season, preseason and playoffs (cached).
+  const scheduleCache = new Map();
+  async function teamGames(sport, abbr) {
+    const key = sport + ":" + abbr;
+    if (scheduleCache.has(key)) return scheduleCache.get(key);
+    const base = `https://site.api.espn.com/apis/site/v2/sports/${sport}/teams/${abbr}/schedule`;
+    const lists = await Promise.all(["2", "1", "3"].map((t) =>
+      fetch(base + "?seasontype=" + t).then((r) => r.json()).then((j) => j.events || []).catch(() => [])));
+    const seen = new Set(), out = [];
+    for (const ev of lists.flat()) { if (!seen.has(ev.id)) { seen.add(ev.id); out.push(ev); } }
+    scheduleCache.set(key, out);
+    return out;
+  }
+  const sameTeam = (espnAbbr, ours) => {
+    const a = String(espnAbbr || "").toLowerCase(), b = String(ours || "").toLowerCase();
+    return a === b || a.slice(0, 3) === b.slice(0, 3);
+  };
+  // Find this game on ESPN: home team's schedule, right opponent, closest date.
+  async function findEspnEvent(m, refSec) {
+    const [away, home] = m.teams;
+    const games = await teamGames(m.sport, home.abbr);
+    const vsOpp = games.filter((ev) =>
+      (ev.competitions?.[0]?.competitors || []).some((c) => sameTeam(c.team?.abbreviation, away.abbr)));
+    const pool = vsOpp.length ? vsOpp : games;
     let best = null;
-    for (const ev of j.events || []) {
-      // A team plays at most one game a day, so the date alone identifies it.
-      const diff = Math.abs(Date.parse(ev.date) - refMs);
-      if (diff < 20 * 3600 * 1000 && (!best || diff < best.diff)) best = { id: ev.id, diff };
+    if (refSec != null) {
+      for (const ev of pool) {
+        const diff = Math.abs(Date.parse(ev.date) / 1000 - refSec);
+        if (diff < 36 * 3600 && (!best || diff < best.diff)) best = { id: ev.id, diff, date: Date.parse(ev.date) / 1000 };
+      }
+    }
+    if (!best) {   // no usable date: the most recent game against this opponent that has started
+      const nowSec = Date.now() / 1000;
+      for (const ev of pool) {
+        const d = Date.parse(ev.date) / 1000;
+        if (d <= nowSec + 3600 && (!best || d > best.date)) best = { id: ev.id, date: d };
+      }
     }
     return best ? best.id : null;
+  }
+  // The moment to match the game by: live = now, replay = when the recording
+  // started, game page = the date in its address. null = not known yet.
+  function matchupRefSec(m) {
+    if (isLiveNow()) return epochNow();
+    if (mediaEpoch0) return mediaEpoch0;
+    if (gameSlug()) return m.date.getTime() / 1000 + 12 * 3600;
+    return null;
   }
   async function ensurePbp() {
     const m = currentMatchup();
     if (!m || pbp.loading) return;
-    const key = m.sport + ":" + m.teams.map((t) => t.abbr).join("-") + ":" + m.date.toDateString();
-    const stale = isLiveNow() && Date.now() - pbp.fetched > 60000; // keep live games fresh
-    if (pbp.key === key && !stale) return;
+    const p = bmPlayer();
+    const refSec = matchupRefSec(m);
+    if (refSec == null && !p) return;            // wait until the player says live vs replay
+    if (refSec == null && !(Date.now() - (pbp.waitSince || (pbp.waitSince = Date.now())) > 4000)) return; // give the replay's date a moment
+    const key = m.sport + ":" + m.teams.map((t) => t.abbr).join("-") + ":" + (refSec ? Math.round(refSec / 21600) : "latest");
+    const stale = isLiveNow() && Date.now() - pbp.fetched > 6000; // keep live games fresh
+    if (pbp.key === key && !stale && pbp.eventId) return;
+    if (pbp.key === key && !pbp.eventId && Date.now() - pbp.fetched < 20000) return; // retry a miss every 20s
     pbp.loading = true;
     try {
-      if (pbp.key !== key) { pbp.eventId = await findEspnEvent(m); pbp.windows = []; pbp.tipReal = null; }
+      if (pbp.key !== key || !pbp.eventId) {
+        pbp.eventId = await findEspnEvent(m, refSec);
+        pbp.windows = []; pbp.plays = []; pbp.tipReal = null;
+      }
       pbp.key = key; pbp.sport = m.sport; pbp.hockey = m.hockey; pbp.fetched = Date.now();
       if (!pbp.eventId) return;
       const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${m.sport}/summary?event=${pbp.eventId}`);
@@ -1006,17 +1445,33 @@
     return halves;
   }
   function allBreaks() {
-    const markers = isLiveNow() ? liveMarkerBreaks() : savedMarkerBreaks();
+    const markers = exactBreaks().filter((b) => b.closed);
     const d = pbp.sport ? streamDelay(pbp.sport) : DEFAULT_DELAY;
     const fromPbp = pbp.windows.map((w) => ({ start: w.start + d, end: w.end + d, kind: w.kind }));
     const pbpHalves = fromPbp.filter((w) => w.kind === "half");
     if (markers.length) {
       // Exact commercials; halftime from the marker pattern or the play-by-play.
-      const halves = clusterHalves(markers);
+      const halves = exactHalves();
       for (const h of pbpHalves) if (!halves.some((x) => x.start < h.end && h.start < x.end)) halves.push(h);
       return { ads: markers, halves, exact: true };
     }
     return { ads: fromPbp.filter((w) => w.kind === "ad"), halves: pbpHalves, exact: false };
+  }
+  // Halftime / intermission from exact breaks only (for Auto-skip mode).
+  // Halftime / intermission for Auto-skip: a cluster of exact breaks that the
+  // play-by-play confirms (it overlaps the end of the half, and no game action
+  // was logged inside it: two ordinary timeouts close together always have
+  // plays logged between them, so they can never pass as halftime).
+  // Without play-by-play there's no confirmation, so nothing is skipped.
+  function exactHalves() {
+    if (!pbp.sport || !pbp.windows.length) return [];
+    const d = streamDelay(pbp.sport);
+    const halfWins = pbp.windows.filter((w) => w.kind === "half").map((w) => ({ start: w.start + d, end: w.end + d }));
+    if (!halfWins.length) return [];
+    const action = (pbp.plays || []).map((pl) => pl.t + d);
+    return clusterHalves(exactBreaks().filter((b) => b.closed)).filter((h) =>
+      halfWins.some((w) => w.start < h.end && h.start < w.end) &&
+      !action.some((t) => t > h.start + 30 && t < h.end - 30));
   }
   function scteBreakAt(now) {
     if (now == null) return null;
@@ -1061,6 +1516,82 @@
     return n;
   }
 
+  // ---- Break guard: never show a commercial when its exact timing is known ----
+  // Runs every 150ms on the player's real position. It only ever acts on exact
+  // breaks (never play-by-play estimates), and only once the position is
+  // settled (not mid-seek). Decisions (pure, so they can be tested):
+  //   - inside a finished break  -> jump to its end (behind the cover)
+  //   - rewound into a break from after it -> jump to just before it instead
+  //   - at the live edge (end not out yet) -> cover + mute until it ends
+  const GUARD_LOOKAHEAD = 0.4;
+  function guardDecision(s) {
+    // s: { pos, prevPos, seeking, live, liveEdge, breaks, halves }
+    if (s.pos == null || s.seeking) return { act: "none" };
+    const all = (s.breaks || []).concat(s.halves || []);
+    const b = all.find((x) => s.pos >= x.start - GUARD_LOOKAHEAD && (x.end == null || s.pos < x.end));
+    if (!b) return { act: "none" };
+    if (b.end != null && s.prevPos != null && s.prevPos >= b.end - 0.5 && s.pos < s.prevPos - 1) {
+      return { act: "back", target: Math.max(b.start - 6, 0), brk: b };
+    }
+    if (b.end == null && !s.live) return { act: "none" };       // only a live break can be unfinished
+    const ready = b.end != null && (!s.live || (s.liveEdge != null && b.end < s.liveEdge - 1.5));
+    if (ready) return { act: "skip", target: b.end + 0.3, brk: b };
+    return { act: "cover", brk: b };
+  }
+  let guardBusy = false, edgeCovered = false, edgeMuted = false, guardSkips = 0, guardPrev = null;
+  function liftEdgeCover() {
+    if (!edgeCovered) return;
+    edgeCovered = false;
+    uncoverPlayer();
+    if (edgeMuted) { try { bmPlayer().unmute(); } catch (e) {} edgeMuted = false; }
+  }
+  async function breakGuard() {
+    if (guardBusy || !WATCH_RE.test(location.pathname) || chooserOpen()) { guardPrev = null; return; }
+    const p = bmPlayer();
+    const v = document.querySelector("#primaryViewer video");
+    const pos = epochNow();
+    if (!p || pos == null) { liftEdgeCover(); guardPrev = null; return; }
+    if (document.getElementById("segfix-cover") && !edgeCovered) { guardPrev = null; return; }   // another jump is running
+    let live = false, liveEdge = null;
+    try { live = p.isLive(); if (live) liveEdge = p.getCurrentTime() - p.getTimeShift(); } catch (e) {}
+    const d = guardDecision({
+      pos, prevPos: guardPrev, seeking: !!(v && v.seeking), live, liveEdge,
+      breaks: exactBreaks(), halves: watchMode === "auto" ? exactHalves() : [],
+    });
+    guardPrev = v && v.seeking ? guardPrev : pos;
+    if (d.act === "none") { liftEdgeCover(); return; }
+    if (d.act === "cover") {
+      if (!edgeCovered) {
+        edgeCovered = true;
+        coverPlayer("Commercial break");
+        try { if (!p.isMuted()) { p.mute(); edgeMuted = true; } } catch (e) {}
+      }
+      const lbl = document.querySelector("#segfix-cover .cv-label");
+      if (lbl) lbl.textContent = d.brk.end != null ? `Commercial break · back in ${mmss(Math.max(0, Math.round(d.brk.end - pos)))}` : "Commercial break · back soon";
+      return;
+    }
+    // "skip" or "back": one jump, behind the cover, so not a frame shows.
+    guardBusy = true;
+    const wasEdge = edgeCovered;
+    edgeCovered = false;
+    try {
+      coverPlayer("");
+      seekEpoch(d.target);
+      for (let i = 0; i < 40; i++) {
+        await sleep(150);
+        const t = epochNow();
+        if (t != null && Math.abs(t - d.target) < 3 && v && !v.seeking) break;
+      }
+      guardSkips++;
+      guardPrev = epochNow();
+    } finally {
+      if (wasEdge && edgeMuted) { try { bmPlayer().unmute(); } catch (e) {} edgeMuted = false; }
+      uncoverPlayer();
+      guardBusy = false;
+    }
+  }
+  setInterval(breakGuard, 150);
+
   // ---- Skipping -------------------------------------------------------------
   let skipping = false;
   async function jumpTo(epoch, doneMsg) {
@@ -1100,12 +1631,15 @@
       box = document.createElement("div");
       box.id = "segfix-skipbox";
       box.innerHTML =
-        `<button type="button" class="segfix-skipbtn main"><span class="lbl">Skip commercial</span>${SKIP_ICON}<kbd class="segfix-key">&#9166;</kbd></button>` +
+        `<button type="button" class="segfix-skipbtn main"><span class="lbl">Skip commercial</span><span class="left"></span>${SKIP_ICON}<span class="prog"></span></button>` +
         `<button type="button" class="segfix-skipbtn ht"><span class="lbl">Skip halftime</span>${SKIP_ICON}<kbd class="segfix-key">H</kbd></button>`;
       box.querySelector(".main").addEventListener("click", (e) => { e.stopPropagation(); e.currentTarget.dataset.mode === "half" ? skipHalftime() : skipBreak(); });
       box.querySelector(".ht").addEventListener("click", (e) => { e.stopPropagation(); skipHalftime(); });
     }
-    keepInLayer(box);
+    // Inside the video area (so it's part of fullscreen and never over the page's menus).
+    const host = document.getElementById("videoPlayer") || document.getElementById("primaryViewer");
+    if (host && box.parentElement !== host) host.appendChild(box);
+    else if (!host) keepInLayer(box);
     return box;
   }
   const mmss = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
@@ -1123,16 +1657,18 @@
     const brk = now == null ? null : all.ads.find((b) => now >= b.start - 0.5 && now < b.end);
     const ht = now == null ? null : all.halves.find((b) => now >= b.start - 0.5 && now < b.end);
     // Only one button: during halftime it skips the whole halftime.
-    box.classList.toggle("show", !!brk || !!ht || adVideos().length > 0);
+    const guarded = !!brk && exactBreaks().some((x) => now >= x.start - 0.6 && (x.end == null || now < x.end));
+    box.classList.toggle("show", (!!brk && !guarded) || !!ht || adVideos().length > 0);
     box.classList.remove("halftime");
-    const main = box.querySelector(".main .lbl");
+    const mainBtn = box.querySelector(".main");
     const word = all.exact ? "Skip commercial" : "Skip to game";
-    if (main) {
-      if (ht) main.textContent = `Skip ${halfName()} · ${mmss(Math.max(0, Math.round(ht.end - now)))}`;
-      else if (brk) main.textContent = `${word} · ${mmss(Math.max(0, Math.round(brk.end - now)))}`;
-      else main.textContent = word;
-    }
-    box.querySelector(".main").dataset.mode = ht ? "half" : "ad";
+    const span = ht || brk;
+    mainBtn.querySelector(".lbl").textContent = ht ? `Skip ${halfName()}` : word;
+    mainBtn.querySelector(".left").textContent = span ? mmss(Math.max(0, Math.round(span.end - now))) : "";
+    // Progress line: how much of the break has gone by.
+    const frac = span ? Math.min(1, Math.max(0, (now - span.start) / Math.max(1, span.end - span.start))) : 0;
+    mainBtn.style.setProperty("--done", (frac * 100).toFixed(1) + "%");
+    mainBtn.dataset.mode = ht ? "half" : "ad";
   }, 500);
   actions.s = () => skipBreak();
   // While a Skip button is showing, Enter or the right arrow skips too.
@@ -1147,17 +1683,27 @@
 
   // Group play-by-play events into "moments": a shot plus its rebound, a foul plus
   // its free-throw setup, or anything logged within 2 seconds of each other.
+  // "Lauri Markkanen makes 26-foot three point jumper (Keyonte George assists)"
+  //  -> "Markkanen makes 26-foot three point jumper" (no scores in these texts).
+  function shortPlayText(pl) {
+    let t = String(pl.text || pl.shortDescription || pl.type?.text || "");
+    t = t.replace(/\s*\(.*?\)\s*/g, " ").replace(/\s+/g, " ").trim();
+    const parts = t.split(" ");
+    if (parts.length > 2 && /^[A-Z]/.test(parts[1])) parts.shift();   // drop first name
+    t = parts.join(" ");
+    return t.length > 46 ? t.slice(0, 44) + "…" : t;
+  }
   function playMoments(plays, hockey) {
     const dead = hockey ? /stoppage|period (start|end)|game end/i : NBA_DEAD;
     const ev = plays
       .filter((pl) => pl.wallclock && !dead.test(pl.type.text))
-      .map((pl) => ({ t: Date.parse(pl.wallclock) / 1000, type: pl.type.text }));
+      .map((pl) => ({ t: Date.parse(pl.wallclock) / 1000, type: pl.type.text, txt: shortPlayText(pl) }));
     const out = [];
     for (const e of ev) {
       const last = out[out.length - 1];
       const followUp = /rebound/i.test(e.type) && last && e.t - last.end <= 6;
       if (last && (e.t - last.end <= 2 || followUp)) { last.end = e.t; continue; }
-      out.push({ t: e.t, end: e.t, type: e.type });
+      out.push({ t: e.t, end: e.t, type: e.type, txt: e.txt });
     }
     return out;
   }
@@ -1180,12 +1726,17 @@
     start = Math.min(start, play - 6);    // always at least 6s of build-up
     return start;
   }
-  function replayLastPlay() {
+  async function replayLastPlay() {
+    // Live games: grab the newest plays first so "last play" is really the last one.
+    if (isLiveNow() && Date.now() - pbp.fetched > 5000 && !pbp.loading) {
+      pbp.fetched = 0;
+      await Promise.race([ensurePbp(), sleep(2000)]);
+    }
+    for (let i = 0; i < 10 && pbp.loading; i++) await sleep(200);
     const now = epochNow();
     if (now == null || !pbp.plays.length) {
-      // No play-by-play (e.g. G League): just go back 10 seconds.
       q('[aria-label="Rewind 10 Seconds"]')?.click();
-      toast(ICONS.back + "10", "left");
+      toast("No play-by-play for this game · back 10s", "left");
       return;
     }
     const d = streamDelay(pbp.sport);
@@ -1198,6 +1749,81 @@
     }
   }
   actions.ArrowDown = () => replayLastPlay();
+
+  // =========================================================================
+  //  WATCH MODES: Normal · Auto-skip   (remembered between games)
+  // =========================================================================
+  const MODE_KEY = "segfix-mode";
+  let watchMode = (() => { try { const m = localStorage.getItem(MODE_KEY); return m === "auto" ? "auto" : "normal"; } catch (e) { return "normal"; } })();
+  function setMode(m) {
+    watchMode = m;
+    try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
+    updateModeButton();
+    toast(m === "auto" ? "Auto-skip on" : "Normal mode");
+  }
+
+  // Auto-skip mode: the break guard also skips exact halftimes (see breakGuard).
+  // Play-by-play estimates never skip on their own.
+
+
+  // ---- Watch-mode picker: icon + name + drop-down (control bar & start chooser) ----
+  const MODES = [
+    { id: "normal", name: "Normal", desc: "Commercials skip themselves when timing is exact",
+      icon: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>' },
+    { id: "auto", name: "Auto-skip", desc: "Also skips halftime when timing is exact",
+      icon: '<svg viewBox="0 0 24 24"><path d="M4 6.2v11.6a1 1 0 0 0 1.55.83L13 13.2v4.6a1 1 0 0 0 1.55.83l7.2-5.8a1 1 0 0 0 0-1.66l-7.2-5.8A1 1 0 0 0 13 6.2v4.6L5.55 5.37A1 1 0 0 0 4 6.2z"/></svg>' },
+  ];
+  const MODE_NEUTRAL_ICON = '<svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+  const CHEVRON = '<svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  function modeInfo(id) { return MODES.find((m) => m.id === id) || MODES[0]; }
+  function buildModePicker(extraClass) {
+    const wrap = document.createElement("div");
+    wrap.className = "segfix-mode " + (extraClass || "");
+    wrap.innerHTML =
+      '<button type="button" class="mode-trigger" title="Watch mode"><span class="mi"></span><span class="ml"></span><span class="mc">' + CHEVRON + "</span></button>" +
+      '<div class="mode-menu" role="menu">' +
+        '<div class="mode-head">Watch mode</div>' +
+        MODES.filter((m) => !(extraClass === "in-chooser" && m.id === "normal"))
+          .map((m) => `<button type="button" class="mode-opt" data-mode="${m.id}"><span class="oi">${m.icon}</span><span class="mt"><span class="t">${m.name}</span><span class="s">${m.desc}</span></span><span class="ck">✓</span></button>`).join("") +
+      "</div>";
+    wrap.querySelector(".mode-trigger").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); wrap.classList.toggle("open"); });
+    wrap.querySelectorAll(".mode-opt").forEach((o) => o.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      wrap.classList.remove("open");
+      const inChooser = !!wrap.closest("#segfix-chooser");
+      if (inChooser) {                       // in the start chooser: just remember the choice
+        // No "Normal" here: picking the active mode again turns it off.
+        watchMode = o.dataset.mode === watchMode ? "normal" : o.dataset.mode;
+        try { localStorage.setItem(MODE_KEY, watchMode); } catch (err) {}
+        updateModeButton();
+      } else if (o.dataset.mode !== watchMode) {
+        setMode(o.dataset.mode);
+      }
+    }));
+    onDoc("click", (e) => { if (!wrap.contains(e.target)) wrap.classList.remove("open"); });
+    return wrap;
+  }
+  function updateModeButton() {
+    const m = modeInfo(watchMode);
+    for (const w of document.querySelectorAll(".segfix-mode")) {
+      const neutral = watchMode === "normal" && w.classList.contains("in-chooser");
+      w.querySelector(".mi").innerHTML = neutral ? MODE_NEUTRAL_ICON : m.icon;
+      w.querySelector(".ml").textContent = neutral ? "Watch mode" : m.name;
+      w.classList.toggle("on", watchMode !== "normal");
+      w.querySelectorAll(".mode-opt").forEach((o) => o.classList.toggle("active", o.dataset.mode === watchMode));
+    }
+  }
+  function decorateModeButton() {
+    if (!WATCH_RE.test(location.pathname)) return;
+    const right = q(".player-controls .right-side") || (q('[aria-label="Enter Fullscreen"], [aria-label="Exit Fullscreen"]') || {}).parentElement;
+    if (!right || right.querySelector("#segfix-modebtn")) return;
+    const wrap = buildModePicker("in-bar");
+    wrap.id = "segfix-modebtn";
+    right.insertBefore(wrap, right.firstChild);
+    updateModeButton();
+  }
+  setInterval(decorateModeButton, 1000);
 
   function decorateControls() {
     const fwd = q('[aria-label="Forward 10 Seconds"]');
@@ -1216,17 +1842,19 @@
   // Pauses and shows a matchup intro card with two big choices:
   // Start at tip-off / Start live (on replays: Keep watching).
   let chooserFor = null;
-  function chooserOpen() { return !!document.getElementById("segfix-chooser"); }
+  // A chooser that is fading out (after a pick) no longer counts as open.
+  function chooserOpen() { const el = document.getElementById("segfix-chooser"); return !!el && !el.classList.contains("closing"); }
   function closeChooser(play) {
     const el = document.getElementById("segfix-chooser");
     if (el) { el.classList.add("closing"); setTimeout(() => el.remove(), 250); }
-    if (play) { uncoverPlayer(); try { bmPlayer().play(); } catch (e) {} }
+    if (play) { uncoverPlayer(); ensurePlaying(); }
   }
   async function chooseStart(action) {
     if (action === "resume") {
       closeChooser(false);
       uncoverPlayer();
-      try { const p = bmPlayer(); if (p.isMuted()) p.unmute(); if (p.getVolume() < 5) p.setVolume(60); p.play(); } catch (e) {}
+      try { const p = bmPlayer(); if (p.isMuted()) p.unmute(); if (p.getVolume() < 5) p.setVolume(60); } catch (e) {}
+      ensurePlaying();
       return;
     }
     coverPlayer("");                 // cover first, so nothing shows as the card fades
@@ -1237,24 +1865,38 @@
   async function fillChooserMatchup(el) {
     const info = currentMatchup();
     const box = el.querySelector(".ch-matchup");
+    const eyebrowDate = el.querySelector(".ch-date");
+    if (info && eyebrowDate) {
+      eyebrowDate.textContent = info.date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    }
     if (!info) {
       const t = playerProps().title;
-      if (t) box.innerHTML = `<div class="ch-plain">${escHtml(t)}</div>`;
+      if (t) box.innerHTML = `<span class="ch-plain">${escHtml(t)}</span>`;
       return;
     }
     try {
       const [away, home] = await Promise.all(info.teams.map((t) => teamRecord(info.sport, t.abbr, info.date, info.hockey)));
       const logo = (t) => t.logo ? `<img src="${escHtml(t.logo.replace("/500/", "/500-dark/"))}" data-fallback="${escHtml(t.logo)}" alt="">` : "";
-      const team = (t, side) =>
-        `<div class="ch-team ${side}">${logo(t)}<b>${escHtml(t.name)}</b><i>${escHtml(t.rec.replace(/-/g, "–"))}</i></div>`;
-      el.style.setProperty("--away", away.color);
-      el.style.setProperty("--home", home.color);
-      box.innerHTML = team(away, "away") + '<div class="ch-at">AT</div>' + team(home, "home");
+      const team = (t) => `<span class="ch-team">${logo(t)}<span class="nm">${escHtml(t.name)}</span></span>`;
+      box.innerHTML = team(away) + '<span class="ch-at">@</span>' + team(home);
       box.querySelectorAll("img").forEach((img) => img.addEventListener("error", () => {
         if (img.dataset.fallback && img.src !== img.dataset.fallback) img.src = img.dataset.fallback; else img.remove();
       }));
-      el.classList.add("has-teams");
     } catch (e) {}
+  }
+
+  // Keyboard selection inside the chooser (↑ / ↓, Enter).
+  function chooserMove(delta) {
+    const el = document.getElementById("segfix-chooser");
+    if (!el) return;
+    const rows = [...el.querySelectorAll(".ch-opt")];
+    let i = rows.findIndex((r) => r.classList.contains("sel"));
+    i = Math.max(0, Math.min(rows.length - 1, i + delta));
+    rows.forEach((r, k) => r.classList.toggle("sel", k === i));
+  }
+  function chooserSelected() {
+    const r = document.querySelector("#segfix-chooser .ch-opt.sel");
+    return r ? r.dataset.a : "tip";
   }
   let earlyCovered = null, earlyCoveredAt = 0;
   function maybeStartChooser() {
@@ -1280,19 +1922,29 @@
     const live = isLiveNow();
     const el = document.createElement("div");
     el.id = "segfix-chooser";
+    const opt = (a, icon, title, sub, key, sel) =>
+      `<button type="button" class="ch-opt${sel ? " sel" : ""}" data-a="${a}"><span class="ic">${icon}</span>` +
+      `<span class="tx"><span class="t">${title}</span><span class="s">${sub}</span></span>` +
+      `<span class="k">Enter</span></button>`;
     el.innerHTML =
-      '<div class="ch-glow away"></div><div class="ch-glow home"></div>' +
-      '<div class="ch-card">' +
-        '<div class="ch-matchup"></div>' +
-        '<div class="ch-q">How do you want to watch?</div>' +
-        '<div class="ch-btns' + (live ? " three" : "") + '">' +
-          '<button type="button" class="ch-btn" data-a="start"><span class="ch-ic"><svg viewBox="0 0 24 24"><path d="M5 5h2.5v14H5zM19.5 6.2v11.6a1 1 0 0 1-1.55.83L9.5 12.83a1 1 0 0 1 0-1.66l8.45-5.8a1 1 0 0 1 1.55.83z"/></svg></span><span class="ch-tx"><b>From the beginning</b><small>Includes the pregame</small></span></button>' +
-          '<button type="button" class="ch-btn primary" data-a="tip"><span class="ch-ic"><svg viewBox="0 0 24 24"><path d="M5 4h14v2.5H5zM6.2 20h11.6a1 1 0 0 0 .83-1.55L12.83 9.7a1 1 0 0 0-1.66 0l-5.8 8.75A1 1 0 0 0 6.2 20z"/></svg></span><span class="ch-tx"><b>At tip-off</b><small>Skip the pregame</small></span></button>' +
-          (live ? '<button type="button" class="ch-btn" data-a="live"><span class="ch-ic"><span class="live-dot"></span></span><span class="ch-tx"><b>Watch live</b><small>Jump in right now</small></span></button>' : "") +
+      '<div class="ch-card" role="dialog" aria-label="Choose your starting point">' +
+        '<div class="ch-top">' +
+          '<div class="ch-eyebrow">' + (live ? '<span class="ch-live">Live</span>' : '<span>Replay</span>') + '<span class="ch-date"></span></div>' +
+          '<div class="ch-matchup"></div>' +
         "</div>" +
-        '<button type="button" class="ch-link" data-a="resume">or keep watching from here</button>' +
-        '<div class="ch-hint"><kbd>Enter</kbd> tip-off <span>·</span> <kbd>Esc</kbd> close</div>' +
+        '<h2 class="ch-h">Choose your starting point</h2>' +
+        '<div class="ch-list">' +
+          opt("start", '<svg viewBox="0 0 24 24"><path d="M5 5h2.5v14H5zM19.5 6.2v11.6a1 1 0 0 1-1.55.83L9.5 12.83a1 1 0 0 1 0-1.66l8.45-5.8a1 1 0 0 1 1.55.83z"/></svg>', "From the beginning", "Includes the pregame show", "", false) +
+          opt("tip", '<svg viewBox="0 0 24 24"><path d="M5 4h14v2.5H5zM6.2 20h11.6a1 1 0 0 0 .83-1.55L12.83 9.7a1 1 0 0 0-1.66 0l-5.8 8.75A1 1 0 0 0 6.2 20z"/></svg>', (pbp.hockey ? "At puck drop" : "At tip-off"), "Starts moments before the opening tip", "Enter", true) +
+          (live ? opt("live", '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>', "Live", "Jump to the current moment", "", false) : "") +
+        "</div>" +
+        '<div class="ch-foot">' +
+          '<button type="button" class="ch-continue" data-a="resume">Continue from current position</button>' +
+        "</div>" +
       "</div>";
+    el.querySelectorAll(".ch-opt").forEach((r) => r.addEventListener("mouseenter", () => {
+      el.querySelectorAll(".ch-opt").forEach((x) => x.classList.toggle("sel", x === r));
+    }));
     el.addEventListener("click", (e) => {
       const b = e.target.closest("[data-a]");
       if (!b) return;
@@ -1350,6 +2002,160 @@
   }
   setInterval(ensureSound, 700);
 
+  // ---- Sharp picture: hold 1080p ---------------------------------------------
+  // The player's automatic quality is timid and often sits at a blurry level.
+  // Lock the best rendition up to 1080p. If the connection really can't keep up
+  // (real buffering, not our own jumps), hand control back to automatic for a
+  // few minutes, then try 1080p again (waiting longer after each failure).
+  const MAX_H = 1080;
+  const hq = { player: null, stalls: [], stallAt: 0, seekAt: 0, backoffUntil: 0, backoffMs: 180000, lockedAt: 0 };
+  function hqTarget(p) {
+    let list = [];
+    try { list = p.getAvailableVideoQualities() || []; } catch (e) {}
+    const ok = list.filter(q => q && q.id != null && (q.height || 0) <= MAX_H);
+    if (!ok.length) return null;
+    ok.sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
+    return ok[0];
+  }
+  function hqGiveUp() {
+    const p = bmPlayer();
+    hq.backoffUntil = Date.now() + hq.backoffMs;
+    hq.backoffMs = Math.min(hq.backoffMs * 2, 15 * 60000);
+    hq.stalls = [];
+    try { p && p.setVideoQuality("auto"); } catch (e) {}
+  }
+  function hqAttach(p) {
+    if (hq.player === p) return;
+    hq.player = p; hq.stalls = []; hq.stallAt = 0; hq.lockedAt = 0;
+    const onSeek = () => { hq.seekAt = Date.now(); };
+    try {
+      p.on("seek", onSeek); p.on("timeshift", onSeek);
+      p.on("stallstarted", () => {
+        // Buffering right after a jump is normal; only count real stalls.
+        if (Date.now() - hq.seekAt < 5000 || Date.now() < hq.backoffUntil) return;
+        hq.stallAt = Date.now();
+      });
+      p.on("stallended", () => {
+        if (!hq.stallAt) return;
+        const len = Date.now() - hq.stallAt;
+        hq.stallAt = 0;
+        if (len < 400) return;
+        hq.stalls = hq.stalls.filter(t => Date.now() - t < 90000).concat(Date.now());
+        if (hq.stalls.length >= 3) hqGiveUp();
+      });
+    } catch (e) {}
+  }
+  function holdQuality() {
+    const p = bmPlayer();
+    if (!p || !WATCH_RE.test(location.pathname)) return;
+    hqAttach(p);
+    // One long freeze (still buffering after 4s) also means the line is too slow.
+    if (hq.stallAt && Date.now() - hq.stallAt > 4000) { hq.stallAt = 0; hqGiveUp(); return; }
+    if (Date.now() < hq.backoffUntil) return;
+    // Held 1080p for 10 calm minutes: next failure backs off only briefly again.
+    if (hq.lockedAt && Date.now() - hq.lockedAt > 600000) hq.backoffMs = 180000;
+    const t = hqTarget(p);
+    if (!t) return;
+    let cur = null;
+    try { cur = p.getVideoQuality(); } catch (e) {}
+    if (cur && cur.id === t.id) { if (!hq.lockedAt) hq.lockedAt = Date.now(); return; }
+    try { p.setVideoQuality(t.id); hq.lockedAt = 0; } catch (e) {}
+  }
+  setInterval(holdQuality, 1000);
+
+
+  // =========================================================================
+  //  PHONE REMOTE (touch screens only): when the game is AirPlayed to a TV the
+  //  phone becomes the remote. Big buttons, skip, start/live, keeps the screen
+  //  awake so skipping keeps working.
+  // =========================================================================
+  const isTouch = () => matchMedia("(hover: none) and (pointer: coarse)").matches;
+  const RICON = {
+    back: '<svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16.2" text-anchor="middle" font-size="6.5" font-weight="800" font-family="system-ui">10</text></svg>',
+    fwd: '<svg viewBox="0 0 24 24"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.2" text-anchor="middle" font-size="6.5" font-weight="800" font-family="system-ui">10</text></svg>',
+    tv: '<svg viewBox="0 0 24 24"><path d="M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-4l-1.4-1.6H20V6H4v9.4h3.4L6 17H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm9 9 6 7H6z"/></svg>',
+    skip: '<svg viewBox="0 0 24 24"><path d="M5 6.2v11.6a1 1 0 0 0 1.55.83L15 12.83a1 1 0 0 0 0-1.66L6.55 5.37A1 1 0 0 0 5 6.2zM17 5h2v14h-2z"/></svg>',
+  };
+  let wakeLock = null;
+  async function keepAwake() {
+    if (!("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+    if (wakeLock && !wakeLock.released) return;
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+  function mainVideo() { return document.querySelector("#primaryViewer video"); }
+  function onTv() { const v = mainVideo(); return !!(v && v.webkitCurrentPlaybackTargetIsWireless); }
+  function isPlaying() {
+    const p = bmPlayer();
+    try { if (p) return p.isPlaying(); } catch (e) {}
+    const v = mainVideo();
+    return !!(v && !v.paused);
+  }
+  function togglePlay() {
+    const p = bmPlayer();
+    try { if (p) { p.isPlaying() ? p.pause() : p.play(); return; } } catch (e) {}
+    actions[" "]();
+  }
+  function getRemote() {
+    let el = document.getElementById("segfix-remote");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "segfix-remote";
+    el.innerHTML =
+      `<div class="r-top"><span class="r-where"></span><button type="button" class="r-air" aria-label="AirPlay">${RICON.tv}<span>AirPlay</span></button></div>` +
+      `<button type="button" class="r-skip">${RICON.skip}<span class="lbl">Skip commercial</span><span class="left"></span></button>` +
+      `<div class="r-pad">` +
+        `<button type="button" class="r-btn r-back" aria-label="Back 10 seconds">${RICON.back}</button>` +
+        `<button type="button" class="r-btn r-play" aria-label="Play or pause"></button>` +
+        `<button type="button" class="r-btn r-fwd" aria-label="Forward 10 seconds">${RICON.fwd}</button>` +
+      `</div>` +
+      `<div class="r-row"><button type="button" data-go="start">From start</button><button type="button" data-go="tip">Tip-off</button><button type="button" data-go="live" class="r-live"><span class="live-dot"></span>Live</button></div>`;
+    const tap = (sel, fn) => el.querySelector(sel).addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); keepAwake(); fn(e); });
+    // Five quick taps on the status line open the diagnostics panel (no keyboard on a phone).
+    let taps = [];
+    el.querySelector(".r-where").addEventListener("click", () => {
+      taps = taps.filter((t) => Date.now() - t < 2000).concat(Date.now());
+      if (taps.length >= 5) { taps = []; toggleDiag(); }
+    });
+    tap(".r-air", () => { const v = mainVideo(); try { v && v.webkitShowPlaybackTargetPicker(); } catch (e) {} });
+    tap(".r-skip", () => (el.querySelector(".r-skip").dataset.mode === "half" ? skipHalftime() : skipBreak()));
+    tap(".r-back", () => clickFirst('[aria-label="Rewind 10 Seconds"]'));
+    tap(".r-fwd", () => clickFirst('[aria-label="Forward 10 Seconds"]'));
+    tap(".r-play", () => togglePlay());
+    for (const b of el.querySelectorAll("[data-go]")) b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation(); keepAwake();
+      const go = b.dataset.go;
+      go === "start" ? goFromStart() : go === "tip" ? goTipOff() : goLive();
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+  setInterval(() => {
+    const show = isTouch() && WATCH_RE.test(location.pathname) && !!document.getElementById("primaryViewer");
+    root.classList.toggle("segfix-phone", show);
+    const old = document.getElementById("segfix-remote");
+    if (!show) { if (old) old.remove(); return; }
+    const el = getRemote();
+    keepAwake();
+    const tv = onTv();
+    el.classList.toggle("on-tv", tv);
+    el.querySelector(".r-where").innerHTML = tv ? '<i class="dot"></i>Playing on TV' : "Playing on this phone";
+    el.querySelector(".r-play").innerHTML = isPlaying() ? ICONS.pause : ICONS.play;
+    // Mirror the Skip button's state.
+    const box = document.getElementById("segfix-skipbox");
+    const main = box && box.querySelector(".main");
+    const sk = el.querySelector(".r-skip");
+    const showSkip = !!(box && box.classList.contains("show"));
+    sk.classList.toggle("show", showSkip);
+    if (main) {
+      sk.querySelector(".lbl").textContent = main.querySelector(".lbl").textContent;
+      sk.querySelector(".left").textContent = main.querySelector(".left").textContent;
+      sk.dataset.mode = main.dataset.mode || "ad";
+      sk.style.setProperty("--done", main.style.getPropertyValue("--done") || "0%");
+    }
+    el.querySelector(".r-live").classList.toggle("hide", !isLiveNow());
+  }, 500);
+  onDoc("visibilitychange", () => { if (document.visibilityState === "visible" && root.classList.contains("segfix-phone")) keepAwake(); });
+
   // ---- Run on every page change -------------------------------------------
   let scheduled = false;
   const onDomChange = () => {
@@ -1358,12 +2164,13 @@
     // A plain timer (not requestAnimationFrame) so it also runs in background tabs.
     setTimeout(() => {
       scheduled = false;
+      if (!alive()) return;
       for (const fn of [installGuard, decorateCards, decorateWatchPage, runPendingStart, decorateRecords, dismissStillWatching]) {
         try { fn(); } catch (e) {}  // one failing step never blocks the others
       }
     }, 60);
   };
-  new MutationObserver(onDomChange).observe(document.documentElement, { childList: true, subtree: true });
+  new MutationObserver(() => { if (alive()) onDomChange(); }).observe(document.documentElement, { childList: true, subtree: true });
   onDomChange();
 
 })();

@@ -4,6 +4,9 @@
     python3 build.py
 
 Outputs:
+  JazzPlusRedo.user.js              userscript (iPhone/iPad/Mac Safari via the Userscripts app,
+                                    Chrome/Firefox/Edge via Tampermonkey). Committed, so it can
+                                    be installed and auto-updated straight from GitHub.
   dist/chrome/                      unpacked Chrome extension (Load unpacked)
   dist/firefox/                     unpacked Firefox add-on
   dist/JazzPlusRedo-Chrome.zip
@@ -80,6 +83,66 @@ def build(target: str) -> pathlib.Path:
     return out
 
 
+RAW_USERSCRIPT = "https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/JazzPlusRedo.user.js"
+
+
+def build_userscript() -> pathlib.Path:
+    """One file that does everything the extension does. Styles go in at page
+    start; the script runs in the page itself once the page has loaded (same
+    timing as the extension)."""
+    css = make_important((SRC / "content.css").read_text())
+    js = (SRC / "content.js").read_text()
+    header = "\n".join([
+        "// ==UserScript==",
+        f"// @name         {NAME}",
+        "// @namespace    https://github.com/jaredpontius/JazzPlusRedo",
+        f"// @version      {VERSION}",
+        f"// @description  {DESCRIPTION}",
+        "// @author       JazzPlusRedo",
+        "// @match        https://segplus.com/*",
+        "// @match        https://www.segplus.com/*",
+        "// @run-at       document-start",
+        "// @inject-into  page",
+        "// @grant        none",
+        "// @noframes",
+        f"// @updateURL    {RAW_USERSCRIPT}",
+        f"// @downloadURL  {RAW_USERSCRIPT}",
+        "// @homepageURL  https://github.com/jaredpontius/JazzPlusRedo",
+        "// @supportURL   https://github.com/jaredpontius/JazzPlusRedo/issues",
+        "// @license      MIT",
+        "// ==/UserScript==",
+        "",
+        "// Built by build.py from extension/content.css + extension/content.js. Edit those, not this.",
+        "",
+    ])
+    body = (
+        "(function () {\n"
+        "  if (window.__jazzPlusRedoUserscript) return;\n"
+        "  window.__jazzPlusRedoUserscript = true;\n"
+        f"  const CSS = {json.dumps(css)};\n"
+        "  const addStyle = () => {\n"
+        "    const s = document.createElement('style');\n"
+        "    s.id = 'jazzplusredo-style';\n"
+        "    s.textContent = CSS;\n"
+        "    (document.head || document.documentElement).appendChild(s);\n"
+        "  };\n"
+        "  addStyle();\n"
+        "  // Some pages rebuild <head>; put the styles back if they vanish.\n"
+        "  new MutationObserver(() => { if (!document.getElementById('jazzplusredo-style')) addStyle(); })\n"
+        "    .observe(document.documentElement, { childList: true, subtree: true });\n"
+        "  const run = () => {\n"
+        "    window.__segfixQuiet = true;\n"
+        + js.rstrip() +   # verbatim: indenting would change multi-line strings
+        "\n  };\n"
+        "  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true });\n"
+        "  else run();\n"
+        "})();\n"
+    )
+    out = HERE / "JazzPlusRedo.user.js"
+    out.write_text(header + body)
+    return out
+
+
 def zip_dir(folder: pathlib.Path, zip_path: pathlib.Path, inner: str = "") -> None:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(folder.rglob("*")):
@@ -95,7 +158,8 @@ def main():
     zip_dir(chrome, DIST / "JazzPlusRedo-Chrome.zip", inner="JazzPlusRedo")
     # Firefox zip has the add-on files at the top level (the installer unzips it).
     zip_dir(firefox, DIST / "JazzPlusRedo-Firefox.zip")
-    print(f"Built v{VERSION}: dist/chrome, dist/firefox and both zips")
+    build_userscript()
+    print(f"Built v{VERSION}: JazzPlusRedo.user.js, dist/chrome, dist/firefox and both zips")
 
 
 if __name__ == "__main__":
