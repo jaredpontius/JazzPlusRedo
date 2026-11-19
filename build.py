@@ -49,6 +49,20 @@ def make_important(css: str) -> str:
     return re.sub(r"(\{)([^{}]*)\}", fix_block, css)
 
 
+DEV_ONLY = re.compile(r"[ \t]*// <dev-only>.*?// </dev-only>[ \t]*\n", re.S)
+FORBIDDEN = ("__segfixDebug", "__segfixCmd", "new Function", "atob(", "eval(")
+
+
+def public_js() -> str:
+    """content.js without the developer-only testing code. Refuses to build
+    if anything that can run code sent from outside is still in there."""
+    js = DEV_ONLY.sub("", (SRC / "content.js").read_text())
+    left = [w for w in FORBIDDEN if w in js]
+    if left or "<dev-only>" in js:
+        raise SystemExit(f"Developer-only code is still in the public build: {left}")
+    return js
+
+
 def manifest(firefox: bool) -> dict:
     m = {
         "manifest_version": 3,
@@ -75,7 +89,7 @@ def build(target: str) -> pathlib.Path:
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "style.css").write_text(make_important((SRC / "content.css").read_text()))
-    (out / "extras.js").write_text("window.__segfixQuiet = true;\n" + (SRC / "content.js").read_text())
+    (out / "extras.js").write_text("window.__segfixQuiet = true;\n" + public_js())
     (out / "manifest.json").write_text(json.dumps(manifest(target == "firefox"), indent=2) + "\n")
     return out
 

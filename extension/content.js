@@ -547,8 +547,8 @@
       );
       const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
       const rec = (t) => info.hockey
-        ? `<em>${t.w}</em>&ndash;${t.l}&ndash;${t.otl}`
-        : `<em>${t.w}</em>&ndash;${t.l}`;
+        ? `<em>${esc(t.w)}</em>&ndash;${esc(t.l)}&ndash;${esc(t.otl)}`
+        : `<em>${esc(t.w)}</em>&ndash;${esc(t.l)}`;
       const team = (t, side) =>
         `<div class="sb-team ${side}" style="--tc:${esc(t.color)}">` +
           `<span class="sb-logo">${t.logo ? `<img src="${esc(t.logo.replace("/500/", "/500-dark/"))}" data-fallback="${esc(t.logo)}" alt="">` : ""}</span>` +
@@ -954,35 +954,6 @@
         .map((e) => (e.innerText || "").trim().replace(/\s+/g, " ")).filter(Boolean).join(" | ").slice(0, 300),
     };
   }
-  function deepProbe() {
-    const inst = findPlayerInstance();
-    const out = { props: {}, adLikeProps: [] };
-    if (inst) {
-      for (const k of Object.keys(inst.props)) {
-        const val = inst.props[k];
-        out.props[k] = typeof val === "object" ? fmt(val, 400) : val;
-      }
-    }
-    // Any component prop whose name mentions ads/breaks, anywhere in the app.
-    const root = document.getElementById("app-wrapper");
-    const seen = new Set(); const stack = root && root._vnode ? [root._vnode] : [];
-    while (stack.length && out.adLikeProps.length < 40) {
-      const vn = stack.pop(); if (!vn || typeof vn !== "object") continue;
-      const c = vn.component;
-      if (c && !seen.has(c)) {
-        seen.add(c);
-        for (const k of Object.keys(c.props || {})) {
-          if (/ad|break|avail|cue|scte|commercial/i.test(k) && !/^(load|head|read|upload|thread|shadow|gradient|badge|radius|padding|add)/i.test(k)) {
-            out.adLikeProps.push((c.type.__name || c.type.name || "?") + "." + k + " = " + fmt(c.props[k], 200));
-          }
-        }
-        stack.push(c.subTree);
-      }
-      if (Array.isArray(vn.children)) for (const ch of vn.children) stack.push(ch);
-      if (vn.suspense) stack.push(vn.suspense.activeBranch);
-    }
-    return out;
-  }
 
   let diagTimer = null;
   function toggleDiag() {
@@ -997,32 +968,6 @@
     diagTimer = setInterval(render, 500);
   }
 
-  // Temporary debug link (only in debug builds): the add-on's bridge script
-  // forwards snapshots to a receiver on this Mac and passes test commands back.
-  if (window.__segfixDebug) {
-    const send = (kind, data) => window.postMessage({ __segfixOut: kind, data }, "*");
-    setInterval(() => { if (document.getElementById("primaryViewer")) send("snap", diagSnapshot()); }, 2000);
-    onWin("message", async (e) => {
-      if (e.source !== window || !e.data || !e.data.__segfixCmd) return;
-      const cmd = String(e.data.__segfixCmd);
-      const before = diagSnapshot();
-      let result = "ok";
-      try {
-        if (cmd === "skip") await skipBreak();
-        else if (cmd === "fwd") q('[aria-label="Forward 10 Seconds"]')?.click();
-        else if (cmd === "back") q('[aria-label="Rewind 10 Seconds"]')?.click();
-        else if (cmd === "startover") result = doStart("0");
-        else if (cmd === "live") result = doStart("-1");
-        else if (cmd === "playpause") q(".play-pause-btn")?.click();
-        else if (cmd === "probe") result = deepProbe();
-        else if (cmd === "mpd") { const t = diag.lastMpd || ""; const i = t.indexOf("<EventStream"); result = { head: t.slice(0, 1500), events: i >= 0 ? t.slice(i, i + 6000) : "none" }; }
-        else if (cmd.startsWith("js:")) { const code = atob(cmd.slice(3)); result = await (new Function("ctx", "return (async () => {" + code + "})()"))({ scte, diag, findPlayerInstance, q, skipBreak, doStart, exactBreaks, pbp, tl, epochNow, guardDecision, savedMarkerBreaks, allBreaks }); }
-        else result = "unknown command";
-      } catch (err) { result = "error: " + err; }
-      await sleep(1500);
-      send("cmd", { cmd, result, before, after: diagSnapshot() });
-    });
-  }
 
   // =========================================================================
   //  BREAK ENGINE: knows when a commercial / halftime is on, for any game.
