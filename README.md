@@ -29,13 +29,14 @@ like normal, and it's just... better. No settings. No account. No nonsense.
 - 🔊 **Never starts muted.**
 - 🧹 **Zero clutter.** No spoiler chat, pop-ups, sponsor banners, or random video carousels.
 - 😴 **Never asks "Are you still watching?"** Yes. Yes we are.
-- 📱 **AirPlay remote.** On iPhone/iPad, a big-button remote with Skip, so watching on the Apple TV is easy.
 
 **Shortcuts:** Space play/pause · ←/→ 10s · **↓** last play · **Enter** / **S** skip break · **H** halftime · **G** live · **M** mute · **F** fullscreen
 
 ---
 
 ## 🚀 Install it (takes about 2 minutes)
+
+Works in **Chrome** and **Firefox** on a computer.
 
 ### 🟡 Chrome (Mac or Windows)
 
@@ -80,52 +81,6 @@ create a developer account, the installer uses Firefox's built-in startup-settin
 Firefox update ever wipes it, just run the install line again.
 </details>
 
-### ✨ New: iPhone, iPad, and one-click installs
-
-Same JazzPlusRedo as a single file (a *userscript*). Use this for **iPhone / iPad**, **Mac Safari**, or if you'd rather skip the Chrome folder / Terminal steps above. It **updates itself**.
-
-👉 **[Install link](https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/JazzPlusRedo.user.js)** (open it *after* setting up the free helper app below)
-
-#### 📱 iPhone / iPad
-
-Perfect for **AirPlaying games to your Apple TV**: your phone turns into a big-button remote
-with **Skip commercial**, ⟲10 / ⟳10, From start, Tip-off and Live, and it keeps the screen awake
-so skipping keeps working.
-
-1. Get the free **[Userscripts](https://apps.apple.com/app/userscripts/id1463298887)** app from
-   the App Store. Open it once and tap **Set Userscripts Directory** (any folder is fine).
-2. In **Safari**, tap the **page menu** (the icon at the left of the address bar) →
-   **Manage Extensions** → turn on **Userscripts**.
-3. Still in Safari, open the **[install link](https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/JazzPlusRedo.user.js)**.
-   Tap the page menu → **Userscripts** → **Install**.
-4. Go to **[segplus.com](https://www.segplus.com)**, tap the page menu → **Userscripts**, and choose
-   **Always Allow on This Website**.
-5. Start a game, tap **AirPlay** on the remote, pick your TV. 🎉
-
-> Safari only. Chrome on iPhone can't run add-ons (Apple's rule, not ours).
-
-#### 💻 Mac (Safari)
-
-1. Get **[Userscripts](https://apps.apple.com/app/userscripts/id1463298887)** from the Mac App Store
-   and open it once.
-2. Safari → **Settings → Extensions** → tick **Userscripts**.
-3. Open the **[install link](https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/JazzPlusRedo.user.js)**,
-   click the Userscripts icon in the toolbar → **Install**.
-4. On segplus.com, click the Userscripts icon and allow it for the site.
-
-#### 🧩 Chrome, Edge, Firefox, Brave (userscript way)
-
-1. Add **[Tampermonkey](https://www.tampermonkey.net/)** to your browser
-   (Firefox fans: **[Violentmonkey](https://violentmonkey.github.io/)** works great too).
-2. **Chrome / Edge / Brave only:** right-click the Tampermonkey icon → **Manage extension** →
-   turn on **Allow User Scripts**. (Newer Chrome requires this switch.)
-3. Click the **[install link](https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/JazzPlusRedo.user.js)**
-   and press **Install**.
-4. Open SEG+ and enjoy. 🎉
-
-**Updating:** nothing to do. The helper app checks for new versions on its own.
-**Removing:** delete JazzPlusRedo from the helper's list of scripts.
-
 ---
 
 ## 🧠 How does it know when a commercial is on?
@@ -154,11 +109,10 @@ public play-by-play for them.
 ## 🛠️ For the nerds
 
 ```bash
-python3 build.py   # builds JazzPlusRedo.user.js, dist/chrome, dist/firefox and both zips
+python3 build.py   # builds dist/chrome, dist/firefox and both zips
 ```
 
-Code lives in `extension/` (`content.js`, `content.css`). Press **Shift + D** on a game (or tap the remote's
-status line 5 times on a phone) to see the commercial detector think out loud.
+Code lives in `extension/` (`content.js`, `content.css`). Press **Shift + D** on a game to see the commercial detector think out loud.
 
 ## 📄 License
 

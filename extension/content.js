@@ -646,7 +646,6 @@
     if (/\.m3u8|\.mpd/i.test(url) || head.startsWith("#EXTM3U") || head.includes("<MPD")) {
       diag.manifests++;
       if (text.includes("<MPD")) { diag.lastMpd = text.length < 3e6 ? text : text.slice(0, 3e6); onPlayerManifest(url, text); }
-      else if (head.startsWith("#EXTM3U") && text.includes("#EXTINF")) onPlayerPlaylist(url, text);
       diag.lastManifestUrl = url.split("?")[0].slice(-80);
       const cues = text.match(CUE_RE);
       if (cues) {
@@ -776,7 +775,7 @@
   }
 
   // ---- The player's own manifest -----------------------------------------
-  const tl = { url: "", recId: null, isStatic: false, segs: [], liveBreaks: [], liveShift: 0 };
+  const tl = { url: "", recId: null, isStatic: false, segs: [], liveBreaks: [] };
   let mediaEpoch0 = null;   // stream clock at playback position 0 (recordings)
   let mpdIsStatic = false;
   let scte = [];            // kept for the diagnostics panel
@@ -788,7 +787,6 @@
     const rec = recIdOf(url);
     if (rec && rec !== tl.recId) { tl.liveBreaks = []; }      // a different recording
     tl.url = url; tl.recId = rec || tl.recId; tl.isStatic = r.isStatic; tl.segs = r.segs;
-    tl.liveShift = 0; hlsState.url = "";            // DASH is the player's stream: it always wins
     mpdIsStatic = r.isStatic;
     mediaEpoch0 = r.isStatic && r.segs[0].epoch != null ? r.segs[0].epoch - r.segs[0].rel : null;
     if (!r.isStatic) {
@@ -801,14 +799,14 @@
   }
   // Player position <-> stream clock, segment by segment.
   function epochFromPlayback(t, live) {
-    if (live) return t + (tl.liveShift || 0);
+    if (live) return t;
     let seg = null;
     for (const s of tl.segs) { if (s.rel <= t + 1e-6) seg = s; else break; }
     if (!seg || seg.ad || seg.epoch == null) return null;
     return seg.epoch + (t - seg.rel);
   }
   function playbackFromEpoch(e, live) {
-    if (live) return e - (tl.liveShift || 0);
+    if (live) return e;
     for (let i = 0; i < tl.segs.length; i++) {
       const s = tl.segs[i], n = tl.segs[i + 1];
       if (s.ad || s.epoch == null) continue;
@@ -829,7 +827,7 @@
   // Switching games: forget the old clock at once (never map with a stale one).
   let tlPath = location.pathname;
   function resetTimeline() {
-    tl.url = ""; tl.recId = null; tl.isStatic = false; tl.segs = []; tl.liveBreaks = []; tl.liveShift = 0; hlsState.url = ""; hlsState.next = 0;
+    tl.url = ""; tl.recId = null; tl.isStatic = false; tl.segs = []; tl.liveBreaks = [];
     mediaEpoch0 = null; mpdIsStatic = false; scte = [];
   }
   // If the player's manifest isn't the one we parsed (or we missed it, e.g. it
@@ -885,132 +883,6 @@
   }
 
 
-  // =========================================================================
-  //  HLS (Safari on iPhone / iPad, and AirPlay): the player plays an HLS
-  //  stream instead of DASH. Each content segment carries the wall clock
-  //  (#EXT-X-PROGRAM-DATE-TIME), which runs exactly 22s behind the DASH
-  //  broadcast clock (measured on several games), so everything is mapped
-  //  onto the same stream clock and the break engine works unchanged.
-  //  Inserted ads are segments with no clock of their own.
-  // =========================================================================
-  const HLS_CLOCK_SHIFT = 22;
-  const hlsState = { url: "", next: 0, variant: "" };
-  const absUrl = (u, base) => { try { return new URL(u, base).href; } catch (e) { return u; } };
-  function parsePlaylist(text) {
-    const lines = text.split(/\r?\n/);
-    const segs = [], events = [];
-    let pos = 0, pdt = null, groupNew = true, anchor = null, dur = 0, isStatic = false, uriAd = false;
-    const isAdUri = (u) => /\/segment\/|dashsegment|\/ads?\/|tm-|-ad-/i.test(u);
-    const epochAt = (at) => (anchor ? anchor.epoch + (at - anchor.rel) : null);
-    for (const raw of lines) {
-      const ln = raw.trim();
-      if (!ln) continue;
-      if (ln.startsWith("#EXT-X-ENDLIST")) isStatic = true;
-      else if (ln.startsWith("#EXT-X-PLAYLIST-TYPE:VOD")) isStatic = true;
-      else if (ln.startsWith("#EXT-X-DISCONTINUITY") && !ln.startsWith("#EXT-X-DISCONTINUITY-SEQUENCE")) groupNew = true;
-      else if (ln.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) {
-        const t = Date.parse(ln.slice(25));
-        if (isFinite(t)) pdt = t / 1000 + HLS_CLOCK_SHIFT;
-      } else if (ln.startsWith("#EXTINF:")) dur = parseFloat(ln.slice(8)) || 0;
-      else if (/^#EXT-X-CUE-OUT(?!-CONT)/.test(ln)) {
-        const d = parseFloat((ln.match(/DURATION=([\d.]+)/i) || ln.match(/CUE-OUT:([\d.]+)/) || [])[1]);
-        events.push({ rel: pos, out: true, dur: isFinite(d) ? d : null });
-      } else if (ln.startsWith("#EXT-X-CUE-IN")) events.push({ rel: pos, out: false });
-      else if (ln.startsWith("#EXT-X-DATERANGE") && /SCTE35-OUT|SCTE35-IN|CUE/i.test(ln)) {
-        const st = Date.parse((ln.match(/START-DATE="([^"]+)"/) || [])[1] || "");
-        const d = parseFloat((ln.match(/(?:PLANNED-)?DURATION=([\d.]+)/) || [])[1]);
-        if (isFinite(st)) events.push({ at: st / 1000 + HLS_CLOCK_SHIFT, out: !/SCTE35-IN/.test(ln), dur: isFinite(d) ? d : null });
-      } else if (!ln.startsWith("#")) {
-        const ad = isAdUri(ln) || (groupNew && pdt == null && uriAd);
-        if (pdt != null && !isAdUri(ln)) {
-          const ep = pdt;
-          // Only start a new piece when the clock jumps (or after a discontinuity).
-          const expect = epochAt(pos);
-          if (groupNew || !anchor || expect == null || Math.abs(expect - ep) > 0.5 || segs[segs.length - 1].ad) {
-            segs.push({ rel: pos, epoch: ep, ad: false, id: "" });
-          }
-          anchor = { rel: pos, epoch: ep };
-        } else if (groupNew || !segs.length || !segs[segs.length - 1].ad !== !ad) {
-          segs.push({ rel: pos, epoch: ad ? null : epochAt(pos), ad, id: "" });
-        }
-        uriAd = true;
-        groupNew = false; pdt = null;
-        pos += dur; dur = 0;
-      }
-    }
-    // Markers -> breaks on the stream clock (a marker's time comes from the
-    // content piece it sits in, or the one just before an ad).
-    const epochAtRel = (r) => {
-      let best = null;
-      for (const sg of segs) if (sg.rel <= r + 1e-6 && !sg.ad && sg.epoch != null) best = sg;
-      return best ? best.epoch + (r - best.rel) : null;
-    };
-    const raw = [];
-    let open = null;
-    for (const e of events) {
-      const at = e.at != null ? e.at : epochAtRel(e.rel);
-      if (at == null) continue;
-      if (e.out) { if (e.dur) raw.push({ start: at, end: at + e.dur }); else if (open == null) open = at; }
-      else if (open != null) { raw.push({ start: open, end: at }); open = null; }
-    }
-    if (open != null) raw.push({ start: open, end: null });
-    for (let i = 0; i < segs.length; i++) {
-      if (!segs[i].ad) continue;
-      let j = i;
-      while (j + 1 < segs.length && segs[j + 1].ad) j++;
-      const prev = segs.slice(0, i).reverse().find((x) => !x.ad && x.epoch != null);
-      const next = segs[j + 1];
-      if (prev) raw.push({ start: prev.epoch + (segs[i].rel - prev.rel), end: next && next.epoch != null ? next.epoch : null });
-      i = j;
-    }
-    return { isStatic, segs, breaks: mergeBreaks(raw), length: pos };
-  }
-  function onPlayerPlaylist(url, text) {
-    let r = null;
-    try { r = parsePlaylist(text); } catch (e) {}
-    if (!r || !r.segs.some((s) => s.epoch != null)) return;
-    const rec = recIdOf(url) || recIdOf(hlsState.url);
-    if (rec && rec !== tl.recId) tl.liveBreaks = [];
-    tl.url = hlsState.url || url; tl.recId = rec || tl.recId; tl.isStatic = r.isStatic; tl.segs = r.segs;
-    tl.liveShift = HLS_CLOCK_SHIFT;
-    mpdIsStatic = r.isStatic;
-    const first = r.segs.find((s) => s.epoch != null);
-    mediaEpoch0 = r.isStatic && first ? first.epoch - first.rel : null;
-    if (!r.isStatic) tl.liveBreaks = mergeBreaks(tl.liveBreaks.filter((b) => b.end != null).concat(r.breaks));
-    scte = r.breaks.map((b) => ({ at: b.start, out: "true", dur: b.end != null ? b.end - b.start : null }));
-    diag.hls = { segs: r.segs.length, ads: r.segs.filter((s) => s.ad).length, breaks: r.breaks.length, static: r.isStatic };
-    if (tl.recId) loadOriginBreaks(tl.recId);
-  }
-  // The player tells us which HLS stream it plays; read it ourselves
-  // (Safari's own video engine fetches it, so the hooks never see it).
-  async function pollHls() {
-    const p = bmPlayer();
-    let src = null;
-    try { src = p && p.getSource && p.getSource(); } catch (e) {}
-    const url = src && src.hls;
-    if (!url || lastMpdSeen || diag.lastMpd) return;      // the player is on DASH: nothing to do here
-    const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-    if (src.dash && !appleTouch && !isHlsPlaying()) return;
-    if (url !== hlsState.url) { hlsState.url = url; hlsState.variant = ""; hlsState.next = 0; }
-    if (Date.now() < hlsState.next) return;
-    hlsState.next = Date.now() + (tl.isStatic && tl.segs.length ? 600000 : 6000);
-    try {
-      if (!hlsState.variant) {
-        const m = await (await ownFetch(url)).text();
-        if (m.includes("#EXTINF")) { hlsState.variant = url; onPlayerPlaylist(url, m); return; }
-        const v = m.split(/\r?\n/).find((l) => l && !l.startsWith("#"));
-        if (!v) return;
-        hlsState.variant = absUrl(v.trim(), url);
-      }
-      onPlayerPlaylist(hlsState.variant, await (await ownFetch(hlsState.variant)).text());
-    } catch (e) {}
-  }
-  function isHlsPlaying() {
-    const v = document.querySelector("#primaryViewer video");
-    return !!(v && /\.m3u8/i.test(v.currentSrc || v.src || ""));
-  }
-  setInterval(pollHls, 2000);
-
   (function hookNetwork() {
     const XO = XMLHttpRequest.prototype.open;
     const XS = XMLHttpRequest.prototype.send;
@@ -1061,11 +933,7 @@
       liveLabel: !!(typeof playerLiveButton === "function" && playerLiveButton()),
       shortAdClips: adVideos().length,
       manifests: diag.manifests,
-      hls: diag.hls || null,
-      hlsUrl: hlsState.url ? hlsState.url.split("?")[0].slice(-70) : null,
-      onTv: (() => { try { return onTv(); } catch (e) { return null; } })(),
       epochNow: (() => { try { return epochNow(); } catch (e) { return null; } })(),
-      liveShift: tl.liveShift,
       lastManifest: diag.lastManifestUrl,
       cueCount: diag.cueCount,
       cueSamples: diag.cueSamples,
@@ -2063,98 +1931,6 @@
   }
   setInterval(holdQuality, 1000);
 
-
-  // =========================================================================
-  //  PHONE REMOTE (touch screens only): when the game is AirPlayed to a TV the
-  //  phone becomes the remote. Big buttons, skip, start/live, keeps the screen
-  //  awake so skipping keeps working.
-  // =========================================================================
-  const isTouch = () => matchMedia("(hover: none) and (pointer: coarse)").matches;
-  const RICON = {
-    back: '<svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/><text x="12" y="16.2" text-anchor="middle" font-size="6.5" font-weight="800" font-family="system-ui">10</text></svg>',
-    fwd: '<svg viewBox="0 0 24 24"><path d="M12 5V2l5 4-5 4V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/><text x="12" y="16.2" text-anchor="middle" font-size="6.5" font-weight="800" font-family="system-ui">10</text></svg>',
-    tv: '<svg viewBox="0 0 24 24"><path d="M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-4l-1.4-1.6H20V6H4v9.4h3.4L6 17H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm9 9 6 7H6z"/></svg>',
-    skip: '<svg viewBox="0 0 24 24"><path d="M5 6.2v11.6a1 1 0 0 0 1.55.83L15 12.83a1 1 0 0 0 0-1.66L6.55 5.37A1 1 0 0 0 5 6.2zM17 5h2v14h-2z"/></svg>',
-  };
-  let wakeLock = null;
-  async function keepAwake() {
-    if (!("wakeLock" in navigator) || document.visibilityState !== "visible") return;
-    if (wakeLock && !wakeLock.released) return;
-    try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
-  }
-  function mainVideo() { return document.querySelector("#primaryViewer video"); }
-  function onTv() { const v = mainVideo(); return !!(v && v.webkitCurrentPlaybackTargetIsWireless); }
-  function isPlaying() {
-    const p = bmPlayer();
-    try { if (p) return p.isPlaying(); } catch (e) {}
-    const v = mainVideo();
-    return !!(v && !v.paused);
-  }
-  function togglePlay() {
-    const p = bmPlayer();
-    try { if (p) { p.isPlaying() ? p.pause() : p.play(); return; } } catch (e) {}
-    actions[" "]();
-  }
-  function getRemote() {
-    let el = document.getElementById("segfix-remote");
-    if (el) return el;
-    el = document.createElement("div");
-    el.id = "segfix-remote";
-    el.innerHTML =
-      `<div class="r-top"><span class="r-where"></span><button type="button" class="r-air" aria-label="AirPlay">${RICON.tv}<span>AirPlay</span></button></div>` +
-      `<button type="button" class="r-skip">${RICON.skip}<span class="lbl">Skip commercial</span><span class="left"></span></button>` +
-      `<div class="r-pad">` +
-        `<button type="button" class="r-btn r-back" aria-label="Back 10 seconds">${RICON.back}</button>` +
-        `<button type="button" class="r-btn r-play" aria-label="Play or pause"></button>` +
-        `<button type="button" class="r-btn r-fwd" aria-label="Forward 10 seconds">${RICON.fwd}</button>` +
-      `</div>` +
-      `<div class="r-row"><button type="button" data-go="start">From start</button><button type="button" data-go="tip">Tip-off</button><button type="button" data-go="live" class="r-live"><span class="live-dot"></span>Live</button></div>`;
-    const tap = (sel, fn) => el.querySelector(sel).addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); keepAwake(); fn(e); });
-    // Five quick taps on the status line open the diagnostics panel (no keyboard on a phone).
-    let taps = [];
-    el.querySelector(".r-where").addEventListener("click", () => {
-      taps = taps.filter((t) => Date.now() - t < 2000).concat(Date.now());
-      if (taps.length >= 5) { taps = []; toggleDiag(); }
-    });
-    tap(".r-air", () => { const v = mainVideo(); try { v && v.webkitShowPlaybackTargetPicker(); } catch (e) {} });
-    tap(".r-skip", () => (el.querySelector(".r-skip").dataset.mode === "half" ? skipHalftime() : skipBreak()));
-    tap(".r-back", () => clickFirst('[aria-label="Rewind 10 Seconds"]'));
-    tap(".r-fwd", () => clickFirst('[aria-label="Forward 10 Seconds"]'));
-    tap(".r-play", () => togglePlay());
-    for (const b of el.querySelectorAll("[data-go]")) b.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation(); keepAwake();
-      const go = b.dataset.go;
-      go === "start" ? goFromStart() : go === "tip" ? goTipOff() : goLive();
-    });
-    document.body.appendChild(el);
-    return el;
-  }
-  setInterval(() => {
-    const show = isTouch() && WATCH_RE.test(location.pathname) && !!document.getElementById("primaryViewer");
-    root.classList.toggle("segfix-phone", show);
-    const old = document.getElementById("segfix-remote");
-    if (!show) { if (old) old.remove(); return; }
-    const el = getRemote();
-    keepAwake();
-    const tv = onTv();
-    el.classList.toggle("on-tv", tv);
-    el.querySelector(".r-where").innerHTML = tv ? '<i class="dot"></i>Playing on TV' : "Playing on this phone";
-    el.querySelector(".r-play").innerHTML = isPlaying() ? ICONS.pause : ICONS.play;
-    // Mirror the Skip button's state.
-    const box = document.getElementById("segfix-skipbox");
-    const main = box && box.querySelector(".main");
-    const sk = el.querySelector(".r-skip");
-    const showSkip = !!(box && box.classList.contains("show"));
-    sk.classList.toggle("show", showSkip);
-    if (main) {
-      sk.querySelector(".lbl").textContent = main.querySelector(".lbl").textContent;
-      sk.querySelector(".left").textContent = main.querySelector(".left").textContent;
-      sk.dataset.mode = main.dataset.mode || "ad";
-      sk.style.setProperty("--done", main.style.getPropertyValue("--done") || "0%");
-    }
-    el.querySelector(".r-live").classList.toggle("hide", !isLiveNow());
-  }, 500);
-  onDoc("visibilitychange", () => { if (document.visibilityState === "visible" && root.classList.contains("segfix-phone")) keepAwake(); });
 
   // ---- Run on every page change -------------------------------------------
   let scheduled = false;
