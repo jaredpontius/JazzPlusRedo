@@ -12,7 +12,7 @@
   const onDoc = (type, fn, opts) => document.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
   const onWin = (type, fn, opts) => window.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
   // Clear anything an older copy left on the page.
-  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-chatbtn, #segfix-chatframe, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
+  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-chatbtn, #segfix-chatframe, #segfix-chatcol, .segfix-rowfilter, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
   for (const el of document.querySelectorAll("[data-segfix]")) delete el.dataset.segfix;
   for (const el of document.querySelectorAll(".segfix-modal-row")) el.classList.remove("segfix-modal-row");
 
@@ -1954,10 +1954,21 @@
   // few minutes, then try 1080p again (waiting longer after each failure).
   const MAX_H = 1080;
   const hq = { player: null, stalls: [], stallAt: 0, seekAt: 0, backoffUntil: 0, backoffMs: 180000, lockedAt: 0 };
+  // The viewer's own pick in SEG+'s quality menu wins until they pick again:
+  // { h: 720 } = hold that size, { auto: true } = let the player adapt. With no
+  // pick, the best size up to 1080p is held (backing off on a weak connection).
+  const QPICK_KEY = "segfix-quality";
+  let qPick = (() => { try { return JSON.parse(localStorage.getItem(QPICK_KEY) || "null"); } catch (e) { return null; } })();
+  function topHeight(p) {
+    let list = [];
+    try { list = p.getAvailableVideoQualities() || []; } catch (e) {}
+    return Math.max(0, ...list.map((q) => (q && q.height) || 0).filter((h) => h <= MAX_H));
+  }
   function hqTarget(p) {
     let list = [];
     try { list = p.getAvailableVideoQualities() || []; } catch (e) {}
-    const ok = list.filter(q => q && q.id != null && (q.height || 0) <= MAX_H);
+    const cap = qPick && qPick.h ? qPick.h : MAX_H;
+    const ok = list.filter(q => q && q.id != null && (q.height || 0) <= cap);
     if (!ok.length) return null;
     ok.sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
     return ok[0];
@@ -1994,6 +2005,14 @@
     const p = bmPlayer();
     if (!p || !WATCH_RE.test(location.pathname)) return;
     hqAttach(p);
+    if (qPick && qPick.auto) return;                      // viewer chose AUTO: hands off
+    if (qPick && qPick.h) {                               // viewer chose a size: keep it, no back-off
+      const t = hqTarget(p);
+      let cur = null;
+      try { cur = p.getVideoQuality(); } catch (e) {}
+      if (t && !(cur && cur.id === t.id)) { try { p.setVideoQuality(t.id); } catch (e) {} }
+      return;
+    }
     // One long freeze (still buffering after 4s) also means the line is too slow.
     if (hq.stallAt && Date.now() - hq.stallAt > 4000) { hq.stallAt = 0; hqGiveUp(); return; }
     if (Date.now() < hq.backoffUntil) return;
@@ -2008,6 +2027,56 @@
   }
   setInterval(holdQuality, 1000);
 
+  // Picks in SEG+'s quality menu (AUTO / 1080P / 720P ...). Anything below the
+  // top size needs a second click within 4s ("Sure?"), so a stray click can't
+  // drop the picture; the confirmed pick is then locked until changed.
+  let qConfirm = null;
+  const clearQConfirm = () => {
+    if (qConfirm) qConfirm.btn.classList.remove("segfix-qconfirm");
+    document.getElementById("segfix-qtip")?.remove();
+    qConfirm = null;
+  };
+  // Small floating tag just outside the menu, beside the row waiting for a
+  // second click. It's a child of SEG+'s popup (so it opens and closes with it)
+  // but positioned outside it, so the menu itself never changes size.
+  function showQTip(row, text) {
+    const pop = row.parentElement;
+    const tip = document.createElement("div");
+    tip.id = "segfix-qtip";
+    tip.setAttribute("role", "button");
+    tip.textContent = text;
+    tip.style.top = Math.round(row.offsetTop + row.offsetHeight / 2) + "px";
+    tip.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); row.click(); });
+    pop.appendChild(tip);
+  }
+  onDoc("click", (e) => {
+    const b = e.target instanceof Element ? e.target.closest(".menu-wrap > div.bottom-12 > button") : null;
+    if (!b || !b.parentElement.parentElement.querySelector(':scope > [aria-label="Quality Settings"]')) return;
+    const label = (b.textContent || "").trim().toUpperCase();
+    const m = /^(\d{3,4})P/.exec(label);
+    const auto = /^AUTO/.test(label);
+    if (!m && !auto) return;
+    const h = m ? +m[1] : null;
+    const p = bmPlayer();
+    const isTop = h != null && p && h >= topHeight(p);
+    if (!isTop && !(qConfirm && qConfirm.btn === b && Date.now() - qConfirm.at < 4000)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      clearQConfirm();
+      b.classList.add("segfix-qconfirm");
+      showQTip(b, auto ? "Confirm Auto" : `Confirm ${h}p`);
+      const mine = { btn: b, at: Date.now() };
+      qConfirm = mine;
+      window.setTimeout(() => { if (qConfirm === mine) clearQConfirm(); }, 4000);
+      return;
+    }
+    clearQConfirm();
+    qPick = auto ? { auto: true } : isTop ? null : { h };
+    try { qPick ? localStorage.setItem(QPICK_KEY, JSON.stringify(qPick)) : localStorage.removeItem(QPICK_KEY); } catch (err) {}
+    hq.backoffUntil = 0; hq.lockedAt = 0; hq.stalls = [];
+    toast(auto ? "Quality: Auto" : isTop ? `Quality: ${h}p` : `Quality locked: ${h}p`);
+  }, true);
+
 
   // =========================================================================
   //  CHAT TOGGLE: a small "Chat" button (bottom right) opens SEG+'s live chat
@@ -2021,8 +2090,53 @@
   const chat = { open: false, x: null, y: null, w: 360, h: 520 };
   try { Object.assign(chat, JSON.parse(localStorage.getItem(CHAT_KEY) || "{}")); } catch (e) {}
   const saveChat = () => { try { localStorage.setItem(CHAT_KEY, JSON.stringify(chat)); } catch (e) {} };
-  const CHAT_ICON = '<svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-4.4 3.5A1 1 0 0 1 4 19.7V17a2 2 0 0 1-1-1.73V6a2 2 0 0 1 2-2zm2 5.5h10v-1.6H7zm0 4h6.5v-1.6H7z"/></svg>';
-  const chatEl = () => document.querySelector("#topSplit > .activity-container");
+  // SEG+'s chat column. Tagged once found, because in fullscreen it can be
+  // carried into the fullscreen view (and then it's no longer under #topSplit).
+  const chatEl = () => document.querySelector(".segfix-chat-el") || document.querySelector("#topSplit > .activity-container");
+  let chatHome = null;     // where the chat lives normally, while it's borrowed for fullscreen
+  function placeChatEl() {
+    const el = chatEl();
+    if (!el) return;
+    el.classList.add("segfix-chat-el");
+    const fs = document.fullscreenElement || document.webkitFullscreenElement;
+    // In fullscreen SEG+ stacks the player above the area the chat lives in, so
+    // the chat is lifted to the top level of the fullscreen view (and put back after).
+    if (chat.open && fs && fs.tagName !== "VIDEO" && el.parentElement !== fs) {
+      if (!chatHome) chatHome = { parent: el.parentElement, next: el.nextSibling };
+      fs.appendChild(el);
+    } else if (chatHome && (!fs || !chat.open || el.parentElement !== fs)) {
+      const { parent, next } = chatHome;
+      chatHome = null;
+      if (parent && parent.isConnected) parent.insertBefore(el, next && next.parentNode === parent ? next : null);
+    }
+  }
+
+  // "Chat" column on SEG+'s quality popup (AUTO / 1080P / ...): ON / OFF.
+  // It lives INSIDE the popup box (pinned to its left edge), so it opens,
+  // fades and closes exactly together with SEG+'s own menu.
+  function syncChatColumn(hasChat) {
+    const qb = document.querySelector('#primaryViewer [aria-label="Quality Settings"]');
+    const wrap = qb && qb.parentElement;
+    const pop = wrap && wrap.querySelector(":scope > div.bottom-12");
+    let col = document.getElementById("segfix-chatcol");
+    if (!pop || !hasChat) { if (col) col.remove(); if (wrap) wrap.classList.remove("segfix-has-chatcol"); return; }
+    if (!col || col.parentElement !== pop || col.dataset.owner !== SEGFIX_ID) {
+      if (col) col.remove();
+      col = document.createElement("div");
+      col.id = "segfix-chatcol";
+      col.dataset.owner = SEGFIX_ID;     // an older copy's column would call the old copy's code
+      col.innerHTML =
+        '<div class="cc-head">Chat</div>' +
+        '<button type="button" data-chat="on"><span class="cc-ck"></span><span>ON</span></button>' +
+        '<button type="button" data-chat="off"><span class="cc-ck"></span><span>OFF</span></button>';
+      for (const b of col.querySelectorAll("button")) {
+        b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleChat(b.dataset.chat === "on"); });
+      }
+      pop.appendChild(col);
+    }
+    wrap.classList.add("segfix-has-chatcol");
+    for (const b of col.querySelectorAll("button")) b.classList.toggle("active", (b.dataset.chat === "on") === chat.open);
+  }
 
   function placeChat() {
     const vw = innerWidth, vh = innerHeight, m = 8;
@@ -2036,19 +2150,6 @@
     root.style.setProperty("--sf-chat-w", chat.w + "px");
     root.style.setProperty("--sf-chat-h", chat.h + "px");
     root.style.setProperty("--sf-chat-head", CHAT_HEAD + "px");
-  }
-
-  function getChatButton() {
-    let b = document.getElementById("segfix-chatbtn");
-    if (b) return b;
-    b = document.createElement("button");
-    b.type = "button";
-    b.id = "segfix-chatbtn";
-    b.title = "Show or hide live chat (C)";
-    b.setAttribute("aria-label", "Live chat");
-    b.innerHTML = CHAT_ICON + '<span>Chat</span><kbd class="segfix-key">C</kbd>';
-    b.addEventListener("click", (e) => { e.stopPropagation(); toggleChat(); });
-    return b;
   }
 
   function getChatFrame() {
@@ -2107,6 +2208,7 @@
   }
 
   function toggleChat(force) {
+    if (!chatEl() || !isLiveNow()) { toast("Chat is only on live games"); return; }
     chat.open = typeof force === "boolean" ? force : !chat.open;
     saveChat();
     syncChat();
@@ -2115,27 +2217,73 @@
 
   function syncChat() {
     const onWatch = WATCH_RE.test(location.pathname) && !!document.getElementById("primaryViewer");
-    const btn = document.getElementById("segfix-chatbtn");
     const frame = document.getElementById("segfix-chatframe");
-    const hasChat = !!chatEl();
-    if (!onWatch || !hasChat) {
-      if (btn) btn.remove();
+    document.getElementById("segfix-chatbtn")?.remove();     // (old corner button; the toggle lives in the quality menu now)
+    // Chat is a live-game thing: replays never get the option.
+    const hasChat = onWatch && !!chatEl() && isLiveNow();
+    syncChatColumn(hasChat);
+    if (!hasChat) {
       if (frame) frame.remove();
       root.classList.remove("segfix-chat-open");
+      placeChatEl();
       return;
     }
-    const b = getChatButton();
-    keepInLayer(b);
-    b.classList.toggle("on", chat.open);
-    b.setAttribute("aria-pressed", String(chat.open));
     root.classList.toggle("segfix-chat-open", chat.open);
+    placeChatEl();
     if (chat.open) { placeChat(); keepInLayer(getChatFrame()); }
     else if (frame) frame.remove();
   }
   actions.c = () => toggleChat();
   onWin("resize", () => { if (chat.open) { placeChat(); saveChat(); } });
   onDoc("fullscreenchange", () => setTimeout(syncChat, 50));
-  setInterval(syncChat, 800);
+  setInterval(syncChat, 250);
+
+  // =========================================================================
+  //  REPLAYS ROW FILTER: "All games / Jazz only" next to a replays row title.
+  //  Jazz only hides the Salt Lake City Stars (G League affiliate) games and
+  //  tells the carousel to re-measure, so arrows and spacing stay right.
+  //  The choice is remembered.
+  // =========================================================================
+  const STARS_KEY = "segfix-jazz-only";
+  const STARS_RE = /Salt Lake City Stars/i;
+  let jazzOnly = (() => { try { return localStorage.getItem(STARS_KEY) === "1"; } catch (e) { return false; } })();
+  function decorateReplayFilter() {
+    for (const h of document.querySelectorAll(".content-slider h2")) {
+      if (!/Replays/i.test(h.textContent || "")) continue;
+      const row = h.closest(".content-slider");
+      const slides = [...row.querySelectorAll(".swiper-slide")];
+      const stars = slides.filter((s) => STARS_RE.test(s.textContent || ""));
+      if (!stars.length) continue;                       // nothing to filter in this row
+      let seg = row.querySelector(":scope .segfix-rowfilter");
+      if (!seg) {
+        seg = document.createElement("div");
+        seg.className = "segfix-rowfilter";
+        seg.setAttribute("role", "group");
+        seg.setAttribute("aria-label", "Show games");
+        seg.innerHTML = '<button type="button" data-v="all">All games</button><button type="button" data-v="jazz">Jazz only</button>';
+        for (const b of seg.querySelectorAll("button")) {
+          b.addEventListener("click", (e) => {
+            e.preventDefault(); e.stopPropagation();
+            jazzOnly = b.dataset.v === "jazz";
+            try { localStorage.setItem(STARS_KEY, jazzOnly ? "1" : "0"); } catch (err) {}
+            decorateReplayFilter();
+          });
+        }
+        h.parentElement.appendChild(seg);
+      }
+      for (const b of seg.querySelectorAll("button")) b.classList.toggle("on", (b.dataset.v === "jazz") === jazzOnly);
+      let changed = false;
+      for (const s of slides) {
+        const hide = jazzOnly && STARS_RE.test(s.textContent || "");
+        if (s.classList.contains("segfix-hide-slide") !== hide) { s.classList.toggle("segfix-hide-slide", hide); changed = true; }
+      }
+      if (changed) {
+        const sw = row.querySelector(".swiper") && row.querySelector(".swiper").swiper;
+        try { if (sw) { sw.update(); sw.slideTo(0, 0); } } catch (e) {}
+      }
+    }
+  }
+  setInterval(decorateReplayFilter, 1000);
 
   // ---- Run on every page change -------------------------------------------
   let scheduled = false;
@@ -2146,7 +2294,7 @@
     setTimeout(() => {
       scheduled = false;
       if (!alive()) return;
-      for (const fn of [installGuard, decorateCards, decorateWatchPage, runPendingStart, decorateRecords, dismissStillWatching]) {
+      for (const fn of [installGuard, decorateCards, decorateWatchPage, runPendingStart, decorateRecords, dismissStillWatching, decorateReplayFilter]) {
         try { fn(); } catch (e) {}  // one failing step never blocks the others
       }
     }, 60);

@@ -22,6 +22,7 @@ html {
 /* Live chat column + its open/close tab + "chat paused" banner */
 /* (the chat column comes back as a floating panel when the Chat button is on; see section 9) */
 html:not(.segfix-chat-open) #topSplit > .activity-container,
+html:not(.segfix-chat-open) .segfix-chat-el,
 #topSplit > button.absolute.right-0,
 #topSplit > div.absolute.right-0,
 div.fixed.z-50:has(> div.backdrop-blur-lg),
@@ -1160,7 +1161,7 @@ button[aria-label="Subtitles"] {
 #segfix-chooser .ch-at { font-size: 14px; }
 
 /* --------------------------------------------------------------------------
-   9. Live chat: small toggle button + floating panel (drag / resize)
+   9. Live chat: On/Off column in the quality menu + floating panel (drag / resize)
    -------------------------------------------------------------------------- */
 html {
   --sf-chat-bg: #15171c;
@@ -1170,48 +1171,6 @@ html {
   --sf-chat-muted: #9aa1ad;
   --sf-chat-font: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
-
-/* Toggle button: bottom right, compact */
-#segfix-chatbtn {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 2147483645;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 34px;
-  padding: 0 10px 0 11px;
-  border-radius: 9px;
-  border: 1px solid var(--sf-chat-line);
-  background: rgba(21, 23, 28, 0.94);   /* solid on purpose: a blur over playing video is costly */
-  color: var(--sf-chat-text);
-  font: 600 13px/1 var(--sf-chat-font);
-  letter-spacing: 0.01em;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.3s ease, transform 0.15s ease;
-}
-#segfix-chatbtn:hover { background: rgba(33, 36, 44, 0.92); border-color: rgba(255, 255, 255, 0.16); }
-#segfix-chatbtn:active { transform: scale(0.97); }
-#segfix-chatbtn:focus-visible { outline: 2px solid var(--sf-purple); outline-offset: 2px; }
-#segfix-chatbtn svg { width: 16px; height: 16px; fill: currentColor; opacity: 0.9; }
-#segfix-chatbtn .segfix-key {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: var(--sf-chat-muted);
-  font: 600 10px/1 var(--sf-chat-font);
-}
-#segfix-chatbtn.on { background: rgba(124, 77, 255, 0.22); border-color: rgba(124, 77, 255, 0.55); }
-#segfix-chatbtn.on svg { color: #c9b6ff; }
-/* Fullscreen: sit above the player's control bar and fade out with the cursor */
-:root:has(:fullscreen, body.fullscreen) #segfix-chatbtn { bottom: 96px; right: 24px; }
-html.segfix-idle:has(:fullscreen) #segfix-chatbtn { opacity: 0; pointer-events: none; }
 
 /* Panel frame: header + resize edges (the chat itself sits right under the header) */
 #segfix-chatframe {
@@ -1276,7 +1235,7 @@ html.segfix-chat-moving, html.segfix-chat-moving * { cursor: grabbing; user-sele
 #segfix-chatframe .cf-sw { bottom: -5px; left: -5px; width: 14px; height: 14px; cursor: nesw-resize; }
 
 /* SEG+'s own chat, lifted out of the page into the panel body */
-html.segfix-chat-open #topSplit > .activity-container {
+html.segfix-chat-open .segfix-chat-el {
   position: fixed;
   left: var(--sf-chat-x);
   top: calc(var(--sf-chat-y) + var(--sf-chat-head));
@@ -1296,20 +1255,136 @@ html.segfix-chat-open #topSplit > .activity-container {
   font-size: 13.5px;
 }
 /* While dragging, let the pointer pass through so the move stays smooth */
-html.segfix-chat-moving #topSplit > .activity-container { pointer-events: none; }
+html.segfix-chat-moving .segfix-chat-el { pointer-events: none; }
 /* Calm, consistent insides: one font, flat dark surfaces, thin scrollbars */
-html.segfix-chat-open #topSplit > .activity-container * { font-family: var(--sf-chat-font); }
-html.segfix-chat-open #topSplit > .activity-container ::-webkit-scrollbar { width: 8px; }
-html.segfix-chat-open #topSplit > .activity-container ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 8px; }
-html.segfix-chat-open #topSplit > .activity-container * { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
-html.segfix-chat-open #topSplit > .activity-container :is(input, textarea) {
+html.segfix-chat-open .segfix-chat-el * { font-family: var(--sf-chat-font); }
+html.segfix-chat-open .segfix-chat-el ::-webkit-scrollbar { width: 8px; }
+html.segfix-chat-open .segfix-chat-el ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 8px; }
+html.segfix-chat-open .segfix-chat-el * { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+html.segfix-chat-open .segfix-chat-el :is(input, textarea) {
   background: var(--sf-chat-bg-2);
   border: 1px solid var(--sf-chat-line);
   border-radius: 8px;
   color: var(--sf-chat-text);
 }
-html.segfix-chat-open #topSplit > .activity-container :is(input, textarea):focus {
+html.segfix-chat-open .segfix-chat-el :is(input, textarea):focus {
   border-color: rgba(124, 77, 255, 0.7);
   outline: none;
   box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.18);
 }
+
+/* "Chat" column: a child of SEG+'s quality popup, pinned to its left edge,
+   so it shares the popup's height, fade and open/close exactly. */
+#segfix-chatcol {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  min-width: 72px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 0.375rem 0 0 0.375rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
+}
+.menu-wrap.segfix-has-chatcol > div.bottom-12 { border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+#segfix-chatcol .cc-head {
+  padding: 0 0.25rem;
+  color: rgba(255, 255, 255, 0.55);
+  font: 700 10px/1.4 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#segfix-chatcol button {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  width: 100%;
+  padding: 0 0.25rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: #fff;
+  font: 800 0.875rem/1.25rem system-ui, -apple-system, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+#segfix-chatcol button:hover { background: rgba(255, 255, 255, 0.12); }
+#segfix-chatcol button.active { background: var(--sf-purple); }
+#segfix-chatcol .cc-ck { width: 0.75rem; font-size: 10px; }
+#segfix-chatcol button.active .cc-ck::before { content: "✓"; }
+
+/* Quality menu: a lower pick waits for a second click. The row gets a quiet
+   highlight (no size change) and a small tag floats just outside the menu,
+   to the right of that row; clicking the tag or the row again switches. */
+.menu-wrap > div.bottom-12 > button.segfix-qconfirm {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+#segfix-qtip {
+  position: absolute;
+  left: calc(100% + 10px);
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: none;
+  box-sizing: border-box;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: #1c1f24;
+  color: #f2f3f5;
+  font: 600 12px/24px Roboto, "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+}
+#segfix-qtip:hover { background: #262a31; border-color: rgba(255, 255, 255, 0.28); }
+/* little pointer toward the row */
+#segfix-qtip::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  background: #1c1f24;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  transform: rotate(45deg);
+}
+#segfix-qtip:hover::before { background: #262a31; border-color: rgba(255, 255, 255, 0.28); }
+
+/* --------------------------------------------------------------------------
+   10. Replays row: "All games / Jazz only" switch (light page)
+   -------------------------------------------------------------------------- */
+.segfix-rowfilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 16px;
+  padding: 2px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #fff;
+}
+.segfix-rowfilter button {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #52525b;
+  font: 600 13px/28px Roboto, "Helvetica Neue", Arial, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.segfix-rowfilter button:hover { color: #18181b; background: #f4f4f5; }
+.segfix-rowfilter button.on { background: #18181b; color: #fff; }
+.segfix-rowfilter button:focus-visible { outline: 2px solid var(--sf-purple); outline-offset: 1px; }
+.swiper-slide.segfix-hide-slide { display: none; }
