@@ -20,7 +20,7 @@ like normal, and it's just... better. No settings. No account. No nonsense.
 - 🎬 **Pick how you start, every game.** A slick matchup card asks: from the beginning, at tip-off, or live.
 - 🏀 **Tip-off means tip-off.** Lands ~3 seconds before the jump ball. No pregame.
 - 🙈 **No spoilers while it loads.** The video stays covered until it's at the right spot.
-- ⏭️ **Skips commercials.** A button pops up when a break starts. Press it (or **Enter**). Poof, back to the game.
+- ⏭️ **Skips commercials.** A button pops up when a break starts. Press it (or **Enter**). Poof, back to the game. Or switch to **Auto-skip** and it just happens.
 - 🦓 **Skips ref reviews** too, often. Bye, four-minute monitor huddles.
 - 🥱 **Skips halftime** with **H**. Intermissions too, hockey fans.
 - ⬇️ **"Wait, what happened?"** Press **↓** to rewatch the last play.
@@ -28,9 +28,10 @@ like normal, and it's just... better. No settings. No account. No nonsense.
 - 🏀 **A real scoreboard** with logos and records. Very purple.
 - 🔊 **Never starts muted.**
 - 🧹 **Zero clutter.** No spoiler chat, pop-ups, sponsor banners, or random video carousels.
+- 💬 **Chat when you want it.** Press **C** for a small chat window you can move anywhere.
 - 😴 **Never asks "Are you still watching?"** Yes. Yes we are.
 
-**Shortcuts:** Space play/pause · ←/→ 10s · **↓** last play · **Enter** / **S** skip break · **H** halftime · **G** live · **M** mute · **F** fullscreen
+**Shortcuts:** Space play/pause · ←/→ 10s · **↓** last play · **Enter** / **S** skip break · **H** halftime · **G** live · **M** mute · **F** fullscreen · **C** chat
 
 ---
 
@@ -90,9 +91,9 @@ Fair question! Two tricks:
 1. **Live games:** TV broadcasts quietly mark every commercial with a hidden "ad starts here" and
    "game's back" signal. JazzPlusRedo reads those, so skips are **exact**. It also remembers them,
    so if you watch the replay later on the same computer, those are exact too.
-2. **Replays:** those hidden signals get stripped out, so it uses ESPN's play-by-play instead. Every
-   play is timestamped, so a long quiet gap after a timeout = commercial (or a ref review 👀), and the
-   next play = game's back. These skips are **usually within a few seconds**.
+2. **Replays:** those hidden signals get stripped out, so it looks at the replay's own timeline to
+   find the breaks. If it can't, it falls back to ESPN's play-by-play (a long quiet gap after a
+   timeout = commercial, or a ref review 👀).
 
 The button says **Skip commercial** when it's exact and **Skip to game** when it's working from the
 play-by-play. Salt Lake City Stars (G League) games only get skipping while live, since there's no
@@ -103,7 +104,8 @@ public play-by-play for them.
 ## 🔒 Privacy
 
 - Only runs on segplus.com, only in your browser.
-- The only other thing it talks to is ESPN's public sports data (logos, records, play-by-play).
+- Besides SEG+ itself, it only loads ESPN's public sports data (logos, records, play-by-play) and,
+  for replays, SEG+'s own timeline preview pictures.
 - It doesn't collect anything, track anything, or send your info anywhere. Ever.
 
 ## 🛠️ For the nerds

@@ -26,6 +26,7 @@ DESCRIPTION = (
     "skip commercials and halftime, team records, From start / Live."
 )
 MATCHES = ["https://segplus.com/*", "https://www.segplus.com/*"]
+PREVIEW_HOST = "https://archive-seg-or.kiswe.com/*"
 
 
 KEYFRAME_SEL = re.compile(r"^\s*(from|to|[\d.]+%)(\s*,\s*(from|to|[\d.]+%))*\s*$")
@@ -69,9 +70,12 @@ def manifest(firefox: bool) -> dict:
         "name": NAME,
         "version": VERSION,
         "description": DESCRIPTION,
-        "host_permissions": MATCHES,
+        # SEG+'s preview pictures for replays live on its video server.
+        "host_permissions": MATCHES + [PREVIEW_HOST],
+        "background": {"scripts": ["slate-bg.js"]} if firefox else {"service_worker": "slate-bg.js"},
         "content_scripts": [
             {"matches": MATCHES, "css": ["style.css"], "run_at": "document_start"},
+            {"matches": MATCHES, "js": ["slate-relay.js"], "run_at": "document_start"},
             {"matches": MATCHES, "js": ["extras.js"], "run_at": "document_idle", "world": "MAIN"},
         ],
     }
@@ -90,6 +94,8 @@ def build(target: str) -> pathlib.Path:
     out.mkdir(parents=True)
     (out / "style.css").write_text(make_important((SRC / "content.css").read_text()))
     (out / "extras.js").write_text("window.__segfixQuiet = true;\n" + public_js())
+    for f in ("slate-bg.js", "slate-relay.js"):
+        shutil.copy(SRC / f, out / f)
     (out / "manifest.json").write_text(json.dumps(manifest(target == "firefox"), indent=2) + "\n")
     return out
 

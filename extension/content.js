@@ -12,7 +12,7 @@
   const onDoc = (type, fn, opts) => document.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
   const onWin = (type, fn, opts) => window.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
   // Clear anything an older copy left on the page.
-  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
+  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-chatbtn, #segfix-chatframe, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
   for (const el of document.querySelectorAll("[data-segfix]")) delete el.dataset.segfix;
   for (const el of document.querySelectorAll(".segfix-modal-row")) el.classList.remove("segfix-modal-row");
 
@@ -387,6 +387,11 @@
     holder.classList.add("segfix-modal-row");
     holder.appendChild(row);         // same row as Watch
     row.classList.add("segfix-in-modal");
+    // Match our buttons' height to Watch Now (once it's back on one line).
+    requestAnimationFrame(() => {
+      const h = Math.round(btn.getBoundingClientRect().height);
+      if (h >= 32 && h <= 64) row.style.setProperty("--sf-watch-h", h + "px");
+    });
   }
 
   // Game cards / schedule rows: add the buttons under Resume / Watch.
@@ -1243,6 +1248,113 @@
     return pbp.tipReal + streamDelay(pbp.sport);
   }
 
+  // ---- Source 2b: the replay's own preview pictures (replays) ----------------
+  // On replays SEG+ swaps every commercial for a "We'll be right back." slate.
+  // The background helper (slate-bg.js) reads the timeline preview sheets (one
+  // frame every 10s) and scores how much each frame looks like that slate; here
+  // the scores become break windows on the video's own timeline. Far more
+  // accurate than play-by-play estimates (which also flag timeouts that had no
+  // commercial). Saved per recording, so it's done once per replay.
+  const SLATE_KEY = "segfix-slate1:";
+  const SLATE_STEP = 10;                    // seconds between preview frames
+  const slate = { rec: null, state: "idle", runs: [], at: 0 };
+  let slateReqId = 0;
+  const slateWaits = new Map();
+  onWin("message", (e) => {
+    if (e.source !== window || !e.data || !e.data.__segfixSlateResult) return;
+    const r = e.data.__segfixSlateResult;
+    const w = slateWaits.get(r.id);
+    if (w) { slateWaits.delete(r.id); w(r); }
+  });
+  function requestSlate(urls) {
+    return new Promise((resolve) => {
+      const id = ++slateReqId;
+      const timer = window.setTimeout(() => { slateWaits.delete(id); resolve({ error: "timeout" }); }, 180000);
+      slateWaits.set(id, (r) => { window.clearTimeout(timer); resolve(r); });
+      window.postMessage({ __segfixSlate: { id, urls } }, location.origin);
+    });
+  }
+  function slateBase() {
+    const m = /^(https:\/\/archive-seg-or\.kiswe\.com\/media\/[\w.-]+\/mix-stream1)\.mpd$/.exec(noQuery(tl.url));
+    return m ? m[1] + "/trickplay_256x144/" : null;
+  }
+  // Scores -> [[startSec, endSec], ...]: runs of 2+ slate frames. The cut-off is
+  // the widest gap in the scores (slate frames sit far below everything else).
+  function slateRuns(d, protoCount) {
+    if (!(protoCount >= 12)) return [];                 // this replay has no slate
+    const vals = d.filter((x) => x != null).sort((a, b) => a - b);
+    let cut = null, gap = 0;
+    for (let i = 0; i + 1 < vals.length; i++) {
+      if (vals[i] < 4 || vals[i] > 25) continue;
+      if (vals[i + 1] - vals[i] > gap) { gap = vals[i + 1] - vals[i]; cut = (vals[i] + vals[i + 1]) / 2; }
+    }
+    if (cut == null || gap < 1.5) return [];
+    const runs = [];
+    for (let i = 0; i < d.length;) {
+      if (d[i] != null && d[i] < cut) {
+        let j = i;
+        while (j + 1 < d.length && d[j + 1] != null && d[j + 1] < cut) j++;
+        if (j > i) runs.push([i * SLATE_STEP, (j + 1) * SLATE_STEP]);   // first slate frame .. first game frame
+        i = j + 1;
+      } else i++;
+    }
+    return runs;
+  }
+  async function ensureSlate() {
+    if (!WATCH_RE.test(location.pathname) || !tl.isStatic) return;
+    const base = slateBase();
+    if (!base) return;
+    const rec = tl.recId || base;
+    if (slate.rec === rec && (slate.state === "done" || slate.state === "busy")) return;
+    if (slate.rec === rec && slate.state === "failed" && Date.now() - slate.at < 120000) return;
+    slate.rec = rec; slate.runs = [];
+    try {
+      const c = JSON.parse(localStorage.getItem(SLATE_KEY + rec) || "null");
+      if (c && Array.isArray(c.runs)) { slate.runs = c.runs; slate.state = "done"; diag.slate = { runs: c.runs.length, saved: true }; return; }
+    } catch (e) {}
+    let dur = 0;
+    try { dur = bmPlayer().getDuration(); } catch (e) {}
+    if (!(dur > 600)) return;
+    slate.state = "busy"; slate.at = Date.now();
+    const n = Math.min(Math.ceil(dur / (SLATE_STEP * 10)), 400);
+    const res = await requestSlate(Array.from({ length: n }, (_, i) => base + "m_" + i + ".jpg"));
+    if (slate.rec !== rec) return;                      // switched games meanwhile
+    slate.at = Date.now();
+    if (!res || res.error || !Array.isArray(res.dist)) { slate.state = "failed"; diag.slate = (res && res.error) || "no answer"; return; }
+    slate.runs = slateRuns(res.dist, res.protoCount);
+    slate.state = "done";
+    diag.slate = { runs: slate.runs.length, proto: res.protoCount, sheets: res.sheets };
+    try { localStorage.setItem(SLATE_KEY + rec, JSON.stringify({ runs: slate.runs, t: Date.now() })); } catch (e) {}
+  }
+  setInterval(() => { ensureSlate(); }, 3000);
+  // Slate runs -> breaks on the stream clock. Skips start ~5s into the slate's
+  // 10s window and land ~3s before the first game frame (the broadcast's return).
+  function slateBreaks() {
+    if (slate.state !== "done" || !slate.runs.length || !tl.isStatic) return null;
+    const v = document.querySelector("#primaryViewer video");
+    const toEpoch = (t) => {
+      const e = epochFromPlayback(t, false);
+      if (e != null) return e;
+      const now = epochNow();
+      return now != null && v ? now - v.currentTime + t : null;
+    };
+    const list = [];
+    for (const [a, b] of slate.runs) {
+      const s = toEpoch(Math.max(0, a - 5)), e = toEpoch(b - 3);
+      if (s != null && e != null && e - s > 15) list.push({ start: s, end: e });
+    }
+    if (!list.length) return null;
+    // Halftime / intermission: slate breaks close together around the end of
+    // the half. The play-by-play says where the half ended, when it's known.
+    let halves = clusterHalves(list);
+    if (pbp.sport && pbp.windows.length) {
+      const d = streamDelay(pbp.sport);
+      const halfWins = pbp.windows.filter((w) => w.kind === "half").map((w) => ({ start: w.start + d - 600, end: w.end + d + 600 }));
+      halves = halves.filter((h) => halfWins.some((w) => w.start < h.end && h.start < w.end));
+    }
+    return { ads: list, halves, exact: false, slate: true };
+  }
+
   // ---- Combine sources -----------------------------------------------------
   // Returns { ads: [{start,end}], halves: [{start,end}], exact: bool } in stream time.
   const HALFTIME_GAP = 240;   // at most 4 min of studio show between halftime breaks
@@ -1268,6 +1380,9 @@
       for (const h of pbpHalves) if (!halves.some((x) => x.start < h.end && h.start < x.end)) halves.push(h);
       return { ads: markers, halves, exact: true };
     }
+    // Replays: the slate in the preview pictures beats play-by-play guesses.
+    const sl = slateBreaks();
+    if (sl) return sl;
     return { ads: fromPbp.filter((w) => w.kind === "ad"), halves: pbpHalves, exact: false };
   }
   // Halftime / intermission from exact breaks only (for Auto-skip mode).
@@ -1329,7 +1444,7 @@
     return n;
   }
 
-  // ---- Break guard: never show a commercial when its exact timing is known ----
+  // ---- Break guard (Auto-skip mode only): never show a commercial when its exact timing is known ----
   // Runs every 150ms on the player's real position. It only ever acts on exact
   // breaks (never play-by-play estimates), and only once the position is
   // settled (not mid-seek). Decisions (pure, so they can be tested):
@@ -1359,6 +1474,9 @@
     if (edgeMuted) { try { bmPlayer().unmute(); } catch (e) {} edgeMuted = false; }
   }
   async function breakGuard() {
+    // Normal mode: never skip, cover or mute on our own. The Skip button
+    // still pops up and the viewer decides.
+    if (watchMode !== "auto") { liftEdgeCover(); guardPrev = null; return; }
     if (guardBusy || !WATCH_RE.test(location.pathname) || chooserOpen()) { guardPrev = null; return; }
     const p = bmPlayer();
     const v = document.querySelector("#primaryViewer video");
@@ -1369,7 +1487,7 @@
     try { live = p.isLive(); if (live) liveEdge = p.getCurrentTime() - p.getTimeShift(); } catch (e) {}
     const d = guardDecision({
       pos, prevPos: guardPrev, seeking: !!(v && v.seeking), live, liveEdge,
-      breaks: exactBreaks(), halves: watchMode === "auto" ? exactHalves() : [],
+      breaks: exactBreaks(), halves: exactHalves(),
     });
     guardPrev = v && v.seeking ? guardPrev : pos;
     if (d.act === "none") { liftEdgeCover(); return; }
@@ -1455,6 +1573,7 @@
     else if (!host) keepInLayer(box);
     return box;
   }
+  const autoSkipped = new Set();   // estimated breaks Auto-skip already jumped over (this page)
   const mmss = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
   setInterval(() => {
     if (!document.getElementById("primaryViewer")) {
@@ -1470,11 +1589,25 @@
     const brk = now == null ? null : all.ads.find((b) => now >= b.start - 0.5 && now < b.end);
     const ht = now == null ? null : all.halves.find((b) => now >= b.start - 0.5 && now < b.end);
     // Only one button: during halftime it skips the whole halftime.
-    const guarded = !!brk && exactBreaks().some((x) => now >= x.start - 0.6 && (x.end == null || now < x.end));
+    // Auto-skip on estimated (play-by-play) breaks: jump once, exactly like
+    // pressing Skip. Exact breaks are already handled by the break guard.
+    // A break that was skipped once is left alone if you rewind into it.
+    if (watchMode === "auto" && !all.exact && !skipping && (brk || ht)) {
+      const span0 = ht || brk;
+      const key = (ht ? "h" : "a") + Math.round(span0.start);
+      let playing = false;
+      try { playing = bmPlayer().isPlaying(); } catch (e) {}
+      if (playing && !autoSkipped.has(key) && span0.end - now > 3) {
+        autoSkipped.add(key);
+        jumpTo(span0.end + 0.3, ht ? (pbp.hockey ? "Skipped intermission ▶" : "Skipped halftime ▶") : "Skipped commercial ▶");
+      }
+    }
+    // In Auto-skip the guard handles exact breaks itself, so no button for those.
+    const guarded = watchMode === "auto" && !!brk && exactBreaks().some((x) => now >= x.start - 0.6 && (x.end == null || now < x.end));
     box.classList.toggle("show", (!!brk && !guarded) || !!ht || adVideos().length > 0);
     box.classList.remove("halftime");
     const mainBtn = box.querySelector(".main");
-    const word = all.exact ? "Skip commercial" : "Skip to game";
+    const word = all.exact || all.slate ? "Skip commercial" : "Skip to game";
     const span = ht || brk;
     mainBtn.querySelector(".lbl").textContent = ht ? `Skip ${halfName()}` : word;
     mainBtn.querySelector(".left").textContent = span ? mmss(Math.max(0, Math.round(span.end - now))) : "";
@@ -1572,21 +1705,23 @@
     watchMode = m;
     try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
     updateModeButton();
-    toast(m === "auto" ? "Auto-skip on" : "Normal mode");
+    toast(m === "auto" ? "Auto-skip on: breaks skip themselves" : "Normal: press Skip when you want");
   }
 
-  // Auto-skip mode: the break guard also skips exact halftimes (see breakGuard).
-  // Play-by-play estimates never skip on their own.
+  // Normal:    nothing skips on its own; the Skip button appears for every
+  //            break and halftime, and you choose.
+  // Auto-skip: the break guard skips exact commercials AND exact halftimes by
+  //            itself; on replays without exact markers, breaks estimated from
+  //            play-by-play are skipped once each (same jump as the button).
 
 
   // ---- Watch-mode picker: icon + name + drop-down (control bar & start chooser) ----
   const MODES = [
-    { id: "normal", name: "Normal", desc: "Commercials skip themselves when timing is exact",
+    { id: "normal", name: "Normal", desc: "A Skip button pops up. You choose when to skip.",
       icon: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>' },
-    { id: "auto", name: "Auto-skip", desc: "Also skips halftime when timing is exact",
+    { id: "auto", name: "Auto-skip", desc: "Skips commercials and halftime for you, hands-free, on live games and replays.",
       icon: '<svg viewBox="0 0 24 24"><path d="M4 6.2v11.6a1 1 0 0 0 1.55.83L13 13.2v4.6a1 1 0 0 0 1.55.83l7.2-5.8a1 1 0 0 0 0-1.66l-7.2-5.8A1 1 0 0 0 13 6.2v4.6L5.55 5.37A1 1 0 0 0 4 6.2z"/></svg>' },
   ];
-  const MODE_NEUTRAL_ICON = '<svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
   const CHEVRON = '<svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   function modeInfo(id) { return MODES.find((m) => m.id === id) || MODES[0]; }
   function buildModePicker(extraClass) {
@@ -1596,8 +1731,7 @@
       '<button type="button" class="mode-trigger" title="Watch mode"><span class="mi"></span><span class="ml"></span><span class="mc">' + CHEVRON + "</span></button>" +
       '<div class="mode-menu" role="menu">' +
         '<div class="mode-head">Watch mode</div>' +
-        MODES.filter((m) => !(extraClass === "in-chooser" && m.id === "normal"))
-          .map((m) => `<button type="button" class="mode-opt" data-mode="${m.id}"><span class="oi">${m.icon}</span><span class="mt"><span class="t">${m.name}</span><span class="s">${m.desc}</span></span><span class="ck">✓</span></button>`).join("") +
+        MODES.map((m) => `<button type="button" class="mode-opt" data-mode="${m.id}"><span class="oi">${m.icon}</span><span class="mt"><span class="t">${m.name}</span><span class="s">${m.desc}</span></span><span class="ck">✓</span></button>`).join("") +
       "</div>";
     wrap.querySelector(".mode-trigger").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); wrap.classList.toggle("open"); });
     wrap.querySelectorAll(".mode-opt").forEach((o) => o.addEventListener("click", (e) => {
@@ -1606,8 +1740,7 @@
       wrap.classList.remove("open");
       const inChooser = !!wrap.closest("#segfix-chooser");
       if (inChooser) {                       // in the start chooser: just remember the choice
-        // No "Normal" here: picking the active mode again turns it off.
-        watchMode = o.dataset.mode === watchMode ? "normal" : o.dataset.mode;
+        watchMode = o.dataset.mode;
         try { localStorage.setItem(MODE_KEY, watchMode); } catch (err) {}
         updateModeButton();
       } else if (o.dataset.mode !== watchMode) {
@@ -1620,9 +1753,8 @@
   function updateModeButton() {
     const m = modeInfo(watchMode);
     for (const w of document.querySelectorAll(".segfix-mode")) {
-      const neutral = watchMode === "normal" && w.classList.contains("in-chooser");
-      w.querySelector(".mi").innerHTML = neutral ? MODE_NEUTRAL_ICON : m.icon;
-      w.querySelector(".ml").textContent = neutral ? "Watch mode" : m.name;
+      w.querySelector(".mi").innerHTML = m.icon;
+      w.querySelector(".ml").textContent = m.name;
       w.classList.toggle("on", watchMode !== "normal");
       w.querySelectorAll(".mode-opt").forEach((o) => o.classList.toggle("active", o.dataset.mode === watchMode));
     }
@@ -1876,6 +2008,134 @@
   }
   setInterval(holdQuality, 1000);
 
+
+  // =========================================================================
+  //  CHAT TOGGLE: a small "Chat" button (bottom right) opens SEG+'s live chat
+  //  in a floating panel you can drag by its header and resize from any edge.
+  //  The chat itself stays SEG+'s own (we only move and restyle it), and the
+  //  panel's position, size and open/closed state are remembered.
+  // =========================================================================
+  const CHAT_KEY = "segfix-chat";
+  const CHAT_HEAD = 40;          // panel header height (px)
+  const CHAT_MIN = { w: 300, h: 260 };
+  const chat = { open: false, x: null, y: null, w: 360, h: 520 };
+  try { Object.assign(chat, JSON.parse(localStorage.getItem(CHAT_KEY) || "{}")); } catch (e) {}
+  const saveChat = () => { try { localStorage.setItem(CHAT_KEY, JSON.stringify(chat)); } catch (e) {} };
+  const CHAT_ICON = '<svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-4.4 3.5A1 1 0 0 1 4 19.7V17a2 2 0 0 1-1-1.73V6a2 2 0 0 1 2-2zm2 5.5h10v-1.6H7zm0 4h6.5v-1.6H7z"/></svg>';
+  const chatEl = () => document.querySelector("#topSplit > .activity-container");
+
+  function placeChat() {
+    const vw = innerWidth, vh = innerHeight, m = 8;
+    chat.w = Math.round(Math.min(Math.max(chat.w, CHAT_MIN.w), vw - 2 * m));
+    chat.h = Math.round(Math.min(Math.max(chat.h, CHAT_MIN.h), vh - 2 * m));
+    if (chat.x == null || chat.y == null) { chat.x = vw - chat.w - 20; chat.y = vh - chat.h - 72; }
+    chat.x = Math.round(Math.min(Math.max(chat.x, m), vw - chat.w - m));
+    chat.y = Math.round(Math.min(Math.max(chat.y, m), vh - chat.h - m));
+    root.style.setProperty("--sf-chat-x", chat.x + "px");
+    root.style.setProperty("--sf-chat-y", chat.y + "px");
+    root.style.setProperty("--sf-chat-w", chat.w + "px");
+    root.style.setProperty("--sf-chat-h", chat.h + "px");
+    root.style.setProperty("--sf-chat-head", CHAT_HEAD + "px");
+  }
+
+  function getChatButton() {
+    let b = document.getElementById("segfix-chatbtn");
+    if (b) return b;
+    b = document.createElement("button");
+    b.type = "button";
+    b.id = "segfix-chatbtn";
+    b.title = "Show or hide live chat (C)";
+    b.setAttribute("aria-label", "Live chat");
+    b.innerHTML = CHAT_ICON + '<span>Chat</span><kbd class="segfix-key">C</kbd>';
+    b.addEventListener("click", (e) => { e.stopPropagation(); toggleChat(); });
+    return b;
+  }
+
+  function getChatFrame() {
+    let f = document.getElementById("segfix-chatframe");
+    if (f) return f;
+    f = document.createElement("div");
+    f.id = "segfix-chatframe";
+    f.innerHTML =
+      '<div class="cf-head">' +
+        '<span class="cf-grip" aria-hidden="true"></span>' +
+        '<span class="cf-title"><i class="cf-dot"></i>Live chat</span>' +
+        '<button type="button" class="cf-btn cf-reset" title="Move back to the corner" aria-label="Reset position">' +
+          '<svg viewBox="0 0 24 24"><path d="M4 14h6v6H8v-2.6l-3.3 3.3-1.4-1.4L6.6 16H4zm16-4h-6V4h2v2.6l3.3-3.3 1.4 1.4L17.4 8H20z"/></svg></button>' +
+        '<button type="button" class="cf-btn cf-close" title="Hide chat (C)" aria-label="Hide chat">' +
+          '<svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"/></svg></button>' +
+      "</div>" +
+      ["n", "e", "s", "w", "ne", "nw", "se", "sw"].map((d) => `<span class="cf-rz cf-${d}" data-dir="${d}"></span>`).join("");
+    f.querySelector(".cf-close").addEventListener("click", (e) => { e.stopPropagation(); toggleChat(false); });
+    f.querySelector(".cf-reset").addEventListener("click", (e) => {
+      e.stopPropagation();
+      chat.x = chat.y = null; chat.w = 360; chat.h = 520;
+      placeChat(); saveChat();
+    });
+    // Drag by the header, resize from any edge or corner (mouse, pen or touch).
+    const startDrag = (e, dir) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      const s = { px: e.clientX, py: e.clientY, x: chat.x, y: chat.y, w: chat.w, h: chat.h };
+      root.classList.add("segfix-chat-moving");
+      const move = (ev) => {
+        const dx = ev.clientX - s.px, dy = ev.clientY - s.py;
+        if (!dir) { chat.x = s.x + dx; chat.y = s.y + dy; }
+        else {
+          if (dir.includes("e")) chat.w = s.w + dx;
+          if (dir.includes("s")) chat.h = s.h + dy;
+          if (dir.includes("w")) { chat.w = Math.max(CHAT_MIN.w, s.w - dx); chat.x = s.x + s.w - chat.w; }
+          if (dir.includes("n")) { chat.h = Math.max(CHAT_MIN.h, s.h - dy); chat.y = s.y + s.h - chat.h; }
+        }
+        placeChat();
+      };
+      const up = () => {
+        root.classList.remove("segfix-chat-moving");
+        removeEventListener("pointermove", move, true);
+        removeEventListener("pointerup", up, true);
+        removeEventListener("pointercancel", up, true);
+        saveChat();
+      };
+      addEventListener("pointermove", move, true);
+      addEventListener("pointerup", up, true);
+      addEventListener("pointercancel", up, true);
+    };
+    f.querySelector(".cf-head").addEventListener("pointerdown", (e) => { if (!e.target.closest(".cf-btn")) startDrag(e, null); });
+    f.querySelector(".cf-head").addEventListener("dblclick", (e) => { if (!e.target.closest(".cf-btn")) f.querySelector(".cf-reset").click(); });
+    for (const h of f.querySelectorAll(".cf-rz")) h.addEventListener("pointerdown", (e) => startDrag(e, h.dataset.dir));
+    return f;
+  }
+
+  function toggleChat(force) {
+    chat.open = typeof force === "boolean" ? force : !chat.open;
+    saveChat();
+    syncChat();
+    toast(chat.open ? "Chat on" : "Chat off");
+  }
+
+  function syncChat() {
+    const onWatch = WATCH_RE.test(location.pathname) && !!document.getElementById("primaryViewer");
+    const btn = document.getElementById("segfix-chatbtn");
+    const frame = document.getElementById("segfix-chatframe");
+    const hasChat = !!chatEl();
+    if (!onWatch || !hasChat) {
+      if (btn) btn.remove();
+      if (frame) frame.remove();
+      root.classList.remove("segfix-chat-open");
+      return;
+    }
+    const b = getChatButton();
+    keepInLayer(b);
+    b.classList.toggle("on", chat.open);
+    b.setAttribute("aria-pressed", String(chat.open));
+    root.classList.toggle("segfix-chat-open", chat.open);
+    if (chat.open) { placeChat(); keepInLayer(getChatFrame()); }
+    else if (frame) frame.remove();
+  }
+  actions.c = () => toggleChat();
+  onWin("resize", () => { if (chat.open) { placeChat(); saveChat(); } });
+  onDoc("fullscreenchange", () => setTimeout(syncChat, 50));
+  setInterval(syncChat, 800);
 
   // ---- Run on every page change -------------------------------------------
   let scheduled = false;
