@@ -67,10 +67,7 @@ JazzPlusRedo in `chrome://extensions`.
 - *"macOS blocked changes to Firefox.app"*? Totally normal. Open **System Settings → Privacy &
   Security → App Management**, switch on **Terminal**, and run the line again.
 - *Updating later?* Just run the same line again. No restart needed; refresh SEG+.
-- *Want it gone?* Run this and it cleans up after itself:
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/firefox/install.sh | sh -s -- --remove
-  ```
+- *Want it gone?* See **🗑️ Remove it** below. It's one copy-paste line.
 
 <details>
 <summary>🤓 Why does Firefox need a Terminal command?</summary>
@@ -81,6 +78,26 @@ create a developer account, the installer uses Firefox's built-in startup-settin
 `~/Library/Application Support/JazzPlusRedo/addon`. The uninstall line removes everything. If a big
 Firefox update ever wipes it, just run the install line again.
 </details>
+
+---
+
+## 🗑️ Remove it
+
+### 🦊 Firefox (Mac)
+
+1. Open **Terminal**, paste this, and press Enter:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/jaredpontius/JazzPlusRedo/main/firefox/install.sh | sh -s -- --remove
+   ```
+
+2. Quit Firefox (**⌘Q**) and open it again. That's it, it's gone.
+
+### 🟡 Chrome
+
+1. Go to **`chrome://extensions`**.
+2. Click **Remove** on JazzPlusRedo.
+3. Delete the **JazzPlusRedo** folder you unzipped (optional).
 
 ---
 
