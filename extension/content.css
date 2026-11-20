@@ -1388,3 +1388,181 @@ html.segfix-chat-open .segfix-chat-el :is(input, textarea):focus {
 .segfix-rowfilter button.on { background: #18181b; color: #fff; }
 .segfix-rowfilter button:focus-visible { outline: 2px solid var(--sf-purple); outline-offset: 1px; }
 .swiper-slide.segfix-hide-slide { display: none; }
+#segfix-chatcol .cc-sep { height: 1px; margin: 0.125rem 0; background: rgba(255, 255, 255, 0.14); }
+
+/* --------------------------------------------------------------------------
+   17. One settings menu (gear) in place of SEG+'s Quality + Speed buttons,
+       and a Chat button where Speed used to be (live games)
+   -------------------------------------------------------------------------- */
+.segfix-hidden-ctl { display: none !important; }
+
+#segfix-settings {
+  --st-bg: #141416;
+  --st-line: rgba(255, 255, 255, 0.08);
+  --st-text: #f2f2f4;
+  --st-dim: rgba(242, 242, 244, 0.56);
+  --st-faint: rgba(242, 242, 244, 0.36);
+  position: relative;
+  display: inline-flex;
+  font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+}
+#segfix-settings .st-gear,
+#segfix-chatbar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+#segfix-settings .st-gear svg,
+#segfix-chatbar svg { width: 22px; height: 22px; fill: currentColor; display: block; }
+#segfix-settings .st-gear svg { transition: transform 0.25s ease; }
+#segfix-settings.open .st-gear { background: rgba(255, 255, 255, 0.1); }
+#segfix-settings.open .st-gear svg { transform: rotate(30deg); }
+#segfix-settings .st-gear:hover,
+#segfix-chatbar:hover { background: rgba(255, 255, 255, 0.1); }
+#segfix-chatbar { color: rgba(255, 255, 255, 0.72); }
+#segfix-chatbar.on { color: #fff; background: rgba(124, 77, 255, 0.35); }
+#segfix-chatbar.on:hover { background: rgba(124, 77, 255, 0.5); }
+
+/* The menu sits above the gear; an invisible bridge keeps hover alive. */
+#segfix-settings .st-menu {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  width: max-content;
+  padding-bottom: 10px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.14s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 10002;
+}
+#segfix-settings.open .st-menu { opacity: 1; transform: none; pointer-events: auto; }
+#segfix-settings .st-panel,
+#segfix-settings .st-sub {
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--st-bg);
+  border: 1px solid var(--st-line);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  box-sizing: border-box;
+}
+#segfix-settings .st-panel { width: 220px; flex: none; }
+#segfix-settings .st-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 8px;
+  border-radius: 8px;
+  color: var(--st-text);
+  font: 600 13px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+}
+#segfix-settings .st-row:hover,
+#segfix-settings .st-row.open { background: rgba(255, 255, 255, 0.07); }
+#segfix-settings .st-arrow { color: var(--st-faint); }
+#segfix-settings .st-row.open .st-arrow { color: var(--st-text); }
+#segfix-settings .st-arrow svg { width: 14px; height: 14px; display: block; }
+#segfix-settings .st-val { color: var(--st-dim); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Choices open to the left, bottom-aligned with the hovered row. */
+#segfix-settings .st-sub {
+  display: none;
+  position: relative;
+  flex: none;
+  min-width: 150px;
+  margin-bottom: var(--st-row-bottom, 0px);
+}
+#segfix-settings .st-sub.show { display: block; }
+#segfix-settings .st-head {
+  padding: 8px 10px 6px;
+  color: var(--st-faint);
+  font: 600 10.5px/1 -apple-system, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#segfix-settings .st-opt {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px 8px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--st-text);
+  font: 500 13px/1 -apple-system, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+#segfix-settings .st-opt:hover { background: rgba(255, 255, 255, 0.07); }
+#segfix-settings .st-opt.on { font-weight: 650; }
+#segfix-settings .st-ck { font-size: 11px; font-weight: 700; visibility: hidden; }
+#segfix-settings .st-opt.on .st-ck { visibility: visible; }
+#segfix-settings .st-opt.confirm { background: rgba(255, 255, 255, 0.12); }
+/* "Click again" tag floats outside the menu, to the left of the row. */
+#segfix-settings .st-tag {
+  position: absolute;
+  right: calc(100% + 16px);
+  top: 50%;
+  transform: translateY(-50%);
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: #1c1f24;
+  color: #f2f3f5;
+  font: 600 12px/24px -apple-system, system-ui, sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+#segfix-settings .st-tag::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  background: #1c1f24;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  transform: rotate(45deg);
+}
+#segfix-settings .st-sync {
+  display: grid;
+  grid-template-columns: 1fr 24px auto 24px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 6px 4px 10px;
+  border-top: 1px solid var(--st-line);
+  color: var(--st-dim);
+  font: 500 12px/1 -apple-system, system-ui, sans-serif;
+}
+#segfix-settings .st-sync b { color: var(--st-text); font-weight: 600; font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
+#segfix-settings .st-sync button {
+  height: 24px;
+  border: 1px solid var(--st-line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--st-text);
+  font: 600 14px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+}
+#segfix-settings .st-sync button:hover { background: rgba(255, 255, 255, 0.12); }

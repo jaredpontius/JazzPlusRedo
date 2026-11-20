@@ -12,7 +12,7 @@
   const onDoc = (type, fn, opts) => document.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
   const onWin = (type, fn, opts) => window.addEventListener(type, (e) => { if (alive()) return fn(e); }, opts);
   // Clear anything an older copy left on the page.
-  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-chatbtn, #segfix-chatframe, #segfix-chatcol, .segfix-rowfilter, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
+  for (const el of document.querySelectorAll("#segfix-chooser, #segfix-cover, #segfix-skipbox, #segfix-chatbtn, #segfix-chatframe, #segfix-chatcol, #segfix-settings, #segfix-chatbar, .segfix-rowfilter, #segfix-toast, #segfix-modebtn, .segfix-mode, #segfix-diag, .segfix-starts, .segfix-matchup, .segfix-skipbreak")) el.remove();
   for (const el of document.querySelectorAll("[data-segfix]")) delete el.dataset.segfix;
   for (const el of document.querySelectorAll(".segfix-modal-row")) el.classList.remove("segfix-modal-row");
 
@@ -314,7 +314,7 @@
     pendingRunning = true;
     try {
       // Cover right away so the old spot never shows, and keep it paused.
-      for (let i = 0; i < 60 && !coverPlayer(p.sp === "tip" ? "Heading to tip-off…" : p.sp === "0" ? "Going to the start…" : "Going live…"); i++) await sleep(100);
+      for (let i = 0; i < 60 && !coverPlayer(p.sp === "tip" ? (p.hockey ? "Heading to puck drop…" : "Heading to tip-off…") : p.sp === "0" ? "Going to the start…" : "Going live…"); i++) await sleep(100);
       for (let i = 0; i < 120 && !playerReady(); i++) { try { bmPlayer()?.pause(); } catch (e) {} await sleep(250); }
       await coveredJump(p.sp === "tip" ? "tip" : p.sp === "0" ? "start" : "live");
     } finally {
@@ -343,6 +343,25 @@
       onPick(b.dataset.sp);
     });
     return row;
+  }
+
+  // Hockey or basketball wording for a start row: "puck drop" vs "tip-off".
+  function setStartRowSport(row, hockey) {
+    const b = row && row.querySelector('button[data-sp="tip"]');
+    if (!b || b.dataset.hockey === String(hockey)) return;
+    b.dataset.hockey = String(hockey);
+    b.title = hockey ? "Right at the opening face-off" : "Right at the opening tip";
+    b.lastChild.nodeValue = hockey ? "From puck drop" : "From tip-off";
+  }
+  // Is this card a Mammoth game? (multiview cards that also show the Jazz stay basketball)
+  function cardIsHockey(btn) {
+    const card = btn.closest(".schedule-tile-preview, .schedule-tile, tr, [class*='tile']") || btn.parentElement;
+    let t = "";
+    for (let el = card, i = 0; el && i < 4; el = el.parentElement, i++) {
+      t = el.textContent || "";
+      if (/Mammoth|Jazz|Stars/i.test(t) || (el.matches && el.matches(".schedule-tile-preview, .schedule-tile"))) break;
+    }
+    return /Mammoth/i.test(t) && !/Jazz/i.test(t);
   }
 
   // Is this card for a game that's live right now? (it shows a LIVE badge)
@@ -402,11 +421,13 @@
       btn.dataset.segfix = "1";
       const holder = btn.parentElement;
       if (!holder || holder.querySelector(":scope > .segfix-starts") || holder.nextElementSibling?.classList.contains("segfix-starts")) continue; // already has buttons
+      const hockey = cardIsHockey(btn);
       const row = makeStartRow((sp) => {
-        try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ sp, t: Date.now() })); } catch (e) {}
-        toast(sp === "tip" ? "Opening at tip-off…" : sp === "0" ? "Opening from the start…" : "Opening live…");
+        try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ sp, t: Date.now(), hockey })); } catch (e) {}
+        toast(sp === "tip" ? (hockey ? "Opening at puck drop…" : "Opening at tip-off…") : sp === "0" ? "Opening from the start…" : "Opening live…");
         btn.click();
       }, cardIsLive(btn));
+      setStartRowSport(row, hockey);
       holder.insertAdjacentElement("afterend", row);
     }
     // The enlarged game pop-up (click a card without hovering first): put
@@ -442,6 +463,7 @@
       row.classList.add("segfix-starts-top");
       pip.insertAdjacentElement("afterend", row);
     }
+    setStartRowSport(row, pbp.hockey);
     const p = bmPlayer();
     let live = false, behind = false;
     try { live = !!(p && p.isLive()); behind = live && p.getTimeShift() < -20; } catch (e) {}
@@ -1104,7 +1126,7 @@
     for (let i = 0; i < pts.length - 1; i++) {
       const a = wc(pts[i]), b = wc(pts[i + 1]);
       if (b - a < 75) continue;
-      if (/end game/i.test(pts[i].type.text)) continue;
+      if (/end game|end of game|game end/i.test(pts[i].type.text)) continue;
       // Find the play where the game actually resumes.
       let j = i + 1;
       if (hockey) { while (j < pts.length && !/face ?off/i.test(pts[j].type.text)) j++; }
@@ -1275,8 +1297,10 @@
     });
   }
   function slateBase() {
-    const m = /^(https:\/\/archive-seg-or\.kiswe\.com\/media\/[\w.-]+\/mix-stream1)\.mpd$/.exec(noQuery(tl.url));
-    return m ? m[1] + "/trickplay_256x144/" : null;
+    // Radio / Spanish are mix-stream2/3 of the same recording: same picture,
+    // so the main stream's preview sheets work for them too.
+    const m = /^(https:\/\/archive-seg-or\.kiswe\.com\/media\/[\w.-]+\/)mix-stream\d+\.mpd$/.exec(noQuery(tl.url));
+    return m ? m[1] + "mix-stream1/trickplay_256x144/" : null;
   }
   // Scores -> [[startSec, endSec], ...]: runs of 2+ slate frames. The cut-off is
   // the widest gap in the scores (slate frames sit far below everything else).
@@ -1351,20 +1375,33 @@
       const d = streamDelay(pbp.sport);
       const halfWins = pbp.windows.filter((w) => w.kind === "half").map((w) => ({ start: w.start + d - 600, end: w.end + d + 600 }));
       halves = halves.filter((h) => halfWins.some((w) => w.start < h.end && h.start < w.end));
+      // A confirmed halftime / intermission the clustering missed: span the
+      // slate breaks inside it, first to last.
+      for (const w of halfWins) {
+        if (halves.some((h) => w.start < h.end && h.start < w.end)) continue;
+        // Only +-2 min around the play-by-play break, so a normal commercial
+        // shortly before the period ended can't be swallowed (with its game play).
+        const inside = list.filter((b) => b.start >= w.start + 480 && b.end <= w.end - 480);
+        if (inside.length >= 2) halves.push({ start: inside[0].start, end: inside[inside.length - 1].end });
+      }
+      halves.sort((a, b) => a.start - b.start);
     }
     return { ads: list, halves, exact: false, slate: true };
   }
 
   // ---- Combine sources -----------------------------------------------------
   // Returns { ads: [{start,end}], halves: [{start,end}], exact: bool } in stream time.
-  const HALFTIME_GAP = 240;   // at most 4 min of studio show between halftime breaks
+  // At most 4 min of studio show between halftime breaks. NHL intermissions
+  // (~18 min) run longer studio segments between their commercials, so allow 7.
+  const HALFTIME_GAP = 240, INTERMISSION_GAP = 420;
   const HALFTIME_MIN = 150;   // halftime breaks run longer than normal timeouts
   function clusterHalves(list) {
     const halves = [];
     for (let i = 0; i < list.length; i++) {
       if (list[i].end - list[i].start < HALFTIME_MIN) continue;
       let j = i;
-      while (j + 1 < list.length && list[j + 1].start - list[j].end < HALFTIME_GAP) j++;
+      const gap = pbp.hockey ? INTERMISSION_GAP : HALFTIME_GAP;
+      while (j + 1 < list.length && list[j + 1].start - list[j].end < gap) j++;
       if (j > i) { halves.push({ start: list[i].start, end: list[j].end }); i = j; }
     }
     return halves;
@@ -1563,7 +1600,7 @@
       box.id = "segfix-skipbox";
       box.innerHTML =
         `<button type="button" class="segfix-skipbtn main"><span class="lbl">Skip commercial</span><span class="left"></span>${SKIP_ICON}<span class="prog"></span></button>` +
-        `<button type="button" class="segfix-skipbtn ht"><span class="lbl">Skip halftime</span>${SKIP_ICON}<kbd class="segfix-key">H</kbd></button>`;
+        `<button type="button" class="segfix-skipbtn ht"><span class="lbl">Skip ${halfName()}</span>${SKIP_ICON}<kbd class="segfix-key">H</kbd></button>`;
       box.querySelector(".main").addEventListener("click", (e) => { e.stopPropagation(); e.currentTarget.dataset.mode === "half" ? skipHalftime() : skipBreak(); });
       box.querySelector(".ht").addEventListener("click", (e) => { e.stopPropagation(); skipHalftime(); });
     }
@@ -1610,6 +1647,7 @@
     const word = all.exact || all.slate ? "Skip commercial" : "Skip to game";
     const span = ht || brk;
     mainBtn.querySelector(".lbl").textContent = ht ? `Skip ${halfName()}` : word;
+    box.querySelector(".ht .lbl").textContent = `Skip ${halfName()}`;
     mainBtn.querySelector(".left").textContent = span ? mmss(Math.max(0, Math.round(span.end - now))) : "";
     // Progress line: how much of the break has gone by.
     const frac = span ? Math.min(1, Math.max(0, (now - span.start) / Math.max(1, span.end - span.start))) : 0;
@@ -1640,7 +1678,7 @@
     return t.length > 46 ? t.slice(0, 44) + "…" : t;
   }
   function playMoments(plays, hockey) {
-    const dead = hockey ? /stoppage|period (start|end)|game end/i : NBA_DEAD;
+    const dead = hockey ? /stoppage|period (start|end)|game end|end of game|shootout (start|end)/i : NBA_DEAD;
     const ev = plays
       .filter((pl) => pl.wallclock && !dead.test(pl.type.text))
       .map((pl) => ({ t: Date.parse(pl.wallclock) / 1000, type: pl.type.text, txt: shortPlayText(pl) }));
@@ -1719,7 +1757,7 @@
   const MODES = [
     { id: "normal", name: "Normal", desc: "A Skip button pops up. You choose when to skip.",
       icon: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>' },
-    { id: "auto", name: "Auto-skip", desc: "Skips commercials and halftime for you, hands-free, on live games and replays.",
+    { id: "auto", name: "Auto-skip", desc: "Skips commercials and halftime or intermissions for you, hands-free, on live games and replays.",
       icon: '<svg viewBox="0 0 24 24"><path d="M4 6.2v11.6a1 1 0 0 0 1.55.83L13 13.2v4.6a1 1 0 0 0 1.55.83l7.2-5.8a1 1 0 0 0 0-1.66l-7.2-5.8A1 1 0 0 0 13 6.2v4.6L5.55 5.37A1 1 0 0 0 4 6.2z"/></svg>' },
   ];
   const CHEVRON = '<svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1733,7 +1771,11 @@
         '<div class="mode-head">Watch mode</div>' +
         MODES.map((m) => `<button type="button" class="mode-opt" data-mode="${m.id}"><span class="oi">${m.icon}</span><span class="mt"><span class="t">${m.name}</span><span class="s">${m.desc}</span></span><span class="ck">✓</span></button>`).join("") +
       "</div>";
-    wrap.querySelector(".mode-trigger").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); wrap.classList.toggle("open"); });
+    wrap.querySelector(".mode-trigger").addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      wrap.classList.toggle("open");
+      if (wrap.classList.contains("open") && typeof closeSettings === "function") closeSettings();   // one menu at a time
+    });
     wrap.querySelectorAll(".mode-opt").forEach((o) => o.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1880,7 +1922,7 @@
         '<h2 class="ch-h">Choose your starting point</h2>' +
         '<div class="ch-list">' +
           opt("start", '<svg viewBox="0 0 24 24"><path d="M5 5h2.5v14H5zM19.5 6.2v11.6a1 1 0 0 1-1.55.83L9.5 12.83a1 1 0 0 1 0-1.66l8.45-5.8a1 1 0 0 1 1.55.83z"/></svg>', "From the beginning", "Includes the pregame show", "", false) +
-          opt("tip", '<svg viewBox="0 0 24 24"><path d="M5 4h14v2.5H5zM6.2 20h11.6a1 1 0 0 0 .83-1.55L12.83 9.7a1 1 0 0 0-1.66 0l-5.8 8.75A1 1 0 0 0 6.2 20z"/></svg>', (pbp.hockey ? "At puck drop" : "At tip-off"), "Starts moments before the opening tip", "Enter", true) +
+          opt("tip", '<svg viewBox="0 0 24 24"><path d="M5 4h14v2.5H5zM6.2 20h11.6a1 1 0 0 0 .83-1.55L12.83 9.7a1 1 0 0 0-1.66 0l-5.8 8.75A1 1 0 0 0 6.2 20z"/></svg>', (pbp.hockey ? "At puck drop" : "At tip-off"), (pbp.hockey ? "Starts moments before the opening face-off" : "Starts moments before the opening tip"), "Enter", true) +
           (live ? opt("live", '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>', "Live", "Jump to the current moment", "", false) : "") +
         "</div>" +
         '<div class="ch-foot">' +
@@ -2114,28 +2156,312 @@
   // "Chat" column on SEG+'s quality popup (AUTO / 1080P / ...): ON / OFF.
   // It lives INSIDE the popup box (pinned to its left edge), so it opens,
   // fades and closes exactly together with SEG+'s own menu.
-  function syncChatColumn(hasChat) {
-    const qb = document.querySelector('#primaryViewer [aria-label="Quality Settings"]');
-    const wrap = qb && qb.parentElement;
-    const pop = wrap && wrap.querySelector(":scope > div.bottom-12");
-    let col = document.getElementById("segfix-chatcol");
-    if (!pop || !hasChat) { if (col) col.remove(); if (wrap) wrap.classList.remove("segfix-has-chatcol"); return; }
-    if (!col || col.parentElement !== pop || col.dataset.owner !== SEGFIX_ID) {
-      if (col) col.remove();
-      col = document.createElement("div");
-      col.id = "segfix-chatcol";
-      col.dataset.owner = SEGFIX_ID;     // an older copy's column would call the old copy's code
-      col.innerHTML =
-        '<div class="cc-head">Chat</div>' +
-        '<button type="button" data-chat="on"><span class="cc-ck"></span><span>ON</span></button>' +
-        '<button type="button" data-chat="off"><span class="cc-ck"></span><span>OFF</span></button>';
-      for (const b of col.querySelectorAll("button")) {
-        b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleChat(b.dataset.chat === "on"); });
-      }
-      pop.appendChild(col);
+  // ---- Audio: TV, Spanish or radio call -------------------------------------
+  // SEG+ carries these as separate streams of the same game in its own
+  // "Streams" menu (top bar). We click SEG+'s own buttons; playback keeps its
+  // place. The choice is remembered for the next game.
+  const AUDIO_KEY = "segfix-audio";
+  let audioPref = (() => { try { return localStorage.getItem(AUDIO_KEY) || ""; } catch (e) { return ""; } })();
+  let audioApplied = "";                           // page where the saved choice was applied
+  const audioName = (t) => (/^english$/i.test(t) ? "TV" : t);
+  function audioFeeds() {
+    const cur = document.querySelector('#primaryViewer [aria-label="Individual Streams"]');
+    const menu = cur && cur.parentElement;
+    if (!menu) return null;
+    const opts = [...menu.querySelectorAll("button:not([aria-label])")]
+      .map((b) => ({ b, name: (b.textContent || "").trim() }))
+      .filter((o) => o.name && o.name.length < 24);
+    if (opts.length < 2) return null;
+    return { opts, current: (cur.textContent || "").trim() };
+  }
+  function setAudioFeed(name, quiet) {
+    const f = audioFeeds();
+    const o = f && f.opts.find((x) => x.name === name);
+    if (!o) return;
+    audioPref = name;
+    try { localStorage.setItem(AUDIO_KEY, name); } catch (e) {}
+    if (f.current !== name) o.b.click();
+    if (!quiet) toast(name === "Radio" ? "Radio call" : name === "English" ? "TV audio" : audioName(name) + " audio");
+  }
+  // Use the saved choice once per game, after the game has started playing.
+  function keepAudioPref() {
+    if (!audioPref || audioApplied === location.pathname) return;
+    const f = audioFeeds();
+    if (!f) return;
+    let playing = false;
+    try { playing = bmPlayer().isPlaying(); } catch (e) {}
+    if (!playing) return;
+    audioApplied = location.pathname;
+    if (f.current !== audioPref && f.opts.some((o) => o.name === audioPref)) setAudioFeed(audioPref, true);
+  }
+
+  // ---- Radio sync -----------------------------------------------------------
+  // SEG+'s radio call runs a little ahead of the picture. While Radio is on,
+  // the sound goes through a short delay line so the call lands with the play.
+  // Adjustable ([ and ] or the Audio menu); remembered.
+  const RDELAY_KEY = "segfix-radio-delay";
+  let radioDelay = (() => { try { const v = parseFloat(localStorage.getItem(RDELAY_KEY)); return isFinite(v) ? v : 3; } catch (e) { return 3; } })();
+  const radioOn = () => { const f = audioFeeds(); return !!f && f.current === "Radio"; };
+  // How: SEG+'s streams are copy-protected, so the sound itself can't be
+  // touched. Instead, on the radio stream every video frame is placed slightly
+  // earlier on the timeline (the player's video buffer gets a small time
+  // offset), so the picture runs ahead by the delay and the call lines up.
+  // The shift is fixed when a stream loads; changing it reloads the stream
+  // in place.
+  (() => {
+    const MS = window.MediaSource;
+    const SB = window.SourceBuffer;
+    if (!MS || !SB) return;
+    const tso = Object.getOwnPropertyDescriptor(SB.prototype, "timestampOffset");
+    if (!tso || MS.prototype.__segfixShift) return;          // patched once per page; newest copy sets the hook
+    const orig = MS.prototype.addSourceBuffer;
+    MS.prototype.__segfixShift = true;
+    MS.prototype.addSourceBuffer = function (type) {
+      const sb = orig.call(this, type);
+      try {
+        const shift = /^video\//i.test(String(type)) && typeof window.__segfixVideoShift === "function" ? +window.__segfixVideoShift() || 0 : 0;
+        if (shift > 0) {
+          Object.defineProperty(sb, "timestampOffset", {
+            configurable: true,
+            get() { return tso.get.call(this) + shift; },
+            set(v) { tso.set.call(this, v - shift); },
+          });
+          tso.set.call(sb, -shift);
+          sb.__segfixShift = shift;
+        }
+      } catch (e) {}
+      return sb;
+    };
+  })();
+  let appliedShift = 0;                      // the shift the current stream loaded with
+  window.__segfixVideoShift = () => {
+    appliedShift = radioOn() ? radioDelay : 0;
+    return appliedShift;
+  };
+  let reloadTimer = 0;
+  const reloadTries = new Map();             // delay -> reloads tried (never loop if the player won't take it)
+  function syncRadioDelay() {
+    const want = radioOn() ? radioDelay : 0;
+    if (Math.abs(want - appliedShift) < 0.01) return;
+    const key = location.pathname + ":" + want;
+    if ((reloadTries.get(key) || 0) >= 2) return;
+    if (reloadTimer) return;
+    // Reload the same stream at the same spot so the new shift takes effect.
+    reloadTimer = setTimeout(async () => {
+      reloadTimer = 0;
+      const want2 = radioOn() ? radioDelay : 0;
+      if (Math.abs(want2 - appliedShift) < 0.01) return;
+      const key2 = location.pathname + ":" + want2;
+      reloadTries.set(key2, (reloadTries.get(key2) || 0) + 1);
+      const p = bmPlayer();
+      if (!p || !radioOn()) return;
+      try {
+        const src = p.getSource();
+        const t = p.getCurrentTime();
+        const playing = p.isPlaying();
+        const live = p.isLive();
+        src.options = Object.assign({}, src.options, live ? {} : { startOffset: t });
+        await p.load(src);
+        if (playing) p.play().catch(() => {});
+      } catch (e) {}
+    }, 900);
+  }
+  function nudgeRadioDelay(step) {
+    if (!radioOn()) return toast("Radio sync works while Radio is on");
+    radioDelay = Math.round(Math.min(8, Math.max(0, radioDelay + step)) * 4) / 4;
+    try { localStorage.setItem(RDELAY_KEY, String(radioDelay)); } catch (e) {}
+    syncRadioDelay();
+    toast(`Radio delay ${radioDelay.toFixed(2)}s`);
+    renderSettings();
+  }
+  actions["["] = () => nudgeRadioDelay(-0.25);
+  actions["]"] = () => nudgeRadioDelay(0.25);
+
+  // ---- One settings menu (replaces SEG+'s Quality and Speed buttons) -------
+  // Hover the gear: Quality / Speed / Audio, each with its current value.
+  // Hover a row: its choices open beside it; click one to pick.
+  // SEG+'s Speed button's spot holds a Chat button on live games.
+  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  const GEAR = '<svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.3 7.3 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.6a7.3 7.3 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.5 8.8a.5.5 0 0 0 .1.6l2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3c.1.2.4.3.6.2l2.4-1c.5.4 1.1.7 1.7 1l.4 2.6c0 .2.2.4.5.4h3.8c.3 0 .5-.2.5-.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.4 1c.2.1.5 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>';
+  const CHAT_ICON = '<svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.2 3.6A.5.5 0 0 1 5 19.2V16a2.5 2.5 0 0 1-1-2V5.5z"/></svg>';
+  const ARROW = '<svg viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const speedName = (x) => (x === 1 ? "Normal" : x + "x");
+  function qualityChoices() {
+    const p = bmPlayer();
+    let list = [];
+    try { list = p.getAvailableVideoQualities() || []; } catch (e) {}
+    const hs = [...new Set(list.map((x) => (x && x.height) || 0).filter((h) => h > 0 && h <= MAX_H))].sort((a, b) => b - a);
+    return hs;
+  }
+  function qualityNow() {
+    if (qPick && qPick.auto) return "Auto";
+    if (qPick && qPick.h) return qPick.h + "p";
+    const t = topHeight(bmPlayer());
+    return t ? t + "p" : "Auto";
+  }
+  function pickQuality(v) {           // v: height or "auto"
+    const auto = v === "auto";
+    const h = auto ? null : +v;
+    const isTop = !auto && h >= topHeight(bmPlayer());
+    qPick = auto ? { auto: true } : isTop ? null : { h };
+    try { qPick ? localStorage.setItem(QPICK_KEY, JSON.stringify(qPick)) : localStorage.removeItem(QPICK_KEY); } catch (err) {}
+    hq.backoffUntil = 0; hq.lockedAt = 0; hq.stalls = [];
+    try { auto && bmPlayer().setVideoQuality("auto"); } catch (e) {}
+    holdQuality();
+    toast(auto ? "Quality: Auto" : isTop ? `Quality: ${h}p` : `Quality locked: ${h}p`);
+  }
+  function speedNow() { try { return bmPlayer().getPlaybackSpeed() || 1; } catch (e) { return 1; } }
+
+  let setOpenRow = "";          // which row's choices are showing
+  let setConfirm = null;        // { v, at } waiting for a second click (lower quality)
+  function settingsRows() {
+    const rows = [{ id: "q", name: "Quality", val: qualityNow() }, { id: "s", name: "Speed", val: speedName(speedNow()) }];
+    const f = audioFeeds();
+    if (f) rows.push({ id: "a", name: "Audio", val: audioName(f.current) });
+    return rows;
+  }
+  function settingsChoices(id) {
+    if (id === "q") {
+      const top = topHeight(bmPlayer());
+      const cur = qualityNow();
+      return [...qualityChoices().map((h) => ({ v: String(h), t: h + "p", on: cur === h + "p", sure: h < top })),
+        { v: "auto", t: "Auto", on: cur === "Auto", sure: true }];
     }
-    wrap.classList.add("segfix-has-chatcol");
-    for (const b of col.querySelectorAll("button")) b.classList.toggle("active", (b.dataset.chat === "on") === chat.open);
+    if (id === "s") { const cur = speedNow(); return SPEEDS.map((x) => ({ v: String(x), t: speedName(x), on: Math.abs(cur - x) < 0.01 })); }
+    if (id === "a") { const f = audioFeeds(); return f ? f.opts.map((o) => ({ v: o.name, t: audioName(o.name), on: o.name === f.current })) : []; }
+    return [];
+  }
+  function chooseSetting(id, c, row) {
+    if (id === "q") {
+      if (c.sure && !(setConfirm && setConfirm.v === c.v && Date.now() - setConfirm.at < 4000)) {
+        setConfirm = { v: c.v, at: Date.now() };
+        renderSettings();
+        const mine = setConfirm;
+        setTimeout(() => { if (setConfirm === mine) { setConfirm = null; renderSettings(); } }, 4000);
+        return;
+      }
+      setConfirm = null;
+      pickQuality(c.v);
+    } else if (id === "s") {
+      try { bmPlayer().setPlaybackSpeed(+c.v); } catch (e) {}
+      toast("Speed: " + c.t);
+    } else if (id === "a") {
+      setAudioFeed(c.v);
+      setTimeout(syncRadioDelay, 50);
+    }
+    closeSettings();
+  }
+  function renderSettings() {
+    const w = document.getElementById("segfix-settings");
+    if (!w) return;
+    const rows = settingsRows();
+    if (setOpenRow && !rows.some((r) => r.id === setOpenRow)) setOpenRow = "";
+    const panel = w.querySelector(".st-panel");
+    panel.innerHTML = rows.map((r) =>
+      `<div class="st-row${r.id === setOpenRow ? " open" : ""}" data-row="${r.id}"><span class="st-arrow">${ARROW}</span><span class="st-name">${r.name}</span><span class="st-val">${r.val}</span></div>`).join("");
+    const sub = w.querySelector(".st-sub");
+    if (!setOpenRow) { sub.classList.remove("show"); sub.innerHTML = ""; return; }
+    const choices = settingsChoices(setOpenRow);
+    const head = { q: "Quality", s: "Speed", a: "Audio" }[setOpenRow];
+    sub.innerHTML = `<div class="st-head">${head}</div>` + choices.map((c) => {
+      const waiting = setOpenRow === "q" && setConfirm && setConfirm.v === c.v;
+      return `<button type="button" class="st-opt${c.on ? " on" : ""}${waiting ? " confirm" : ""}" data-v="${c.v}"><span class="st-ck">✓</span><span>${c.t}</span>` +
+        (waiting ? `<span class="st-tag">Click again to confirm</span>` : "") + "</button>";
+    }).join("") +
+      (setOpenRow === "a" && radioOn() ? `<div class="st-sync"><span>Radio delay</span><button type="button" data-n="-1" aria-label="Less delay">−</button><b>${radioDelay.toFixed(2)}s</b><button type="button" data-n="1" aria-label="More delay">+</button></div>` : "");
+    sub.classList.add("show");
+    // Line the choices up with their row.
+    const rowEl = panel.querySelector(`.st-row[data-row="${setOpenRow}"]`);
+    if (rowEl) {
+      const gap = panel.getBoundingClientRect().bottom - rowEl.getBoundingClientRect().bottom;
+      // Bottom-align with the row, but never hang below the panel's bottom.
+      sub.style.setProperty("--st-row-bottom", Math.max(0, Math.round(gap - 6)) + "px");
+    }
+    for (const b of sub.querySelectorAll(".st-opt")) {
+      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); const c = choices.find((x) => x.v === b.dataset.v); if (c) chooseSetting(setOpenRow, c, b); });
+    }
+    for (const b of sub.querySelectorAll(".st-sync button")) {
+      b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); nudgeRadioDelay(+b.dataset.n * 0.25); });
+    }
+  }
+  let setCloseTimer = 0;
+  function openSettings() {
+    const w = document.getElementById("segfix-settings");
+    if (!w) return;
+    clearTimeout(setCloseTimer);
+    // Only one menu at a time: opening settings closes the Watch mode menu.
+    for (const m of document.querySelectorAll(".segfix-mode.open")) m.classList.remove("open");
+    if (!w.classList.contains("open")) { setOpenRow = ""; setConfirm = null; w.classList.add("open"); renderSettings(); }
+  }
+  function closeSettings() {
+    const w = document.getElementById("segfix-settings");
+    clearTimeout(setCloseTimer);
+    setOpenRow = ""; setConfirm = null;
+    if (w) { w.classList.remove("open"); renderSettings(); }
+  }
+  function buildSettings() {
+    const w = document.createElement("div");
+    w.id = "segfix-settings";
+    w.dataset.owner = SEGFIX_ID;
+    w.innerHTML = `<button type="button" class="st-gear" aria-label="Settings" title="Settings">${GEAR}</button>` +
+      '<div class="st-menu"><div class="st-sub"></div><div class="st-panel" role="menu"></div></div>';
+    w.addEventListener("mouseenter", openSettings);
+    w.addEventListener("mouseleave", () => { clearTimeout(setCloseTimer); setCloseTimer = setTimeout(closeSettings, 280); });
+    w.querySelector(".st-gear").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); w.classList.contains("open") ? closeSettings() : openSettings(); });
+    w.querySelector(".st-panel").addEventListener("mouseover", (e) => {
+      const r = e.target instanceof Element && e.target.closest(".st-row");
+      if (r && r.dataset.row !== setOpenRow) { setOpenRow = r.dataset.row; setConfirm = null; renderSettings(); }
+    });
+    w.querySelector(".st-panel").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = e.target instanceof Element && e.target.closest(".st-row");
+      if (r) { setOpenRow = r.dataset.row; renderSettings(); }
+    });
+    onDoc("click", (e) => { if (!w.contains(e.target)) closeSettings(); });
+    return w;
+  }
+  function buildChatButton() {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = "segfix-chatbar";
+    b.dataset.owner = SEGFIX_ID;
+    b.innerHTML = CHAT_ICON;
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleChat(); });
+    return b;
+  }
+  // Keep the gear and the chat button in SEG+'s control bar.
+  function syncChatColumn(hasChat) {
+    document.getElementById("segfix-chatcol")?.remove();       // (older layout)
+    const qb = document.querySelector('#primaryViewer [aria-label="Quality Settings"]');
+    const sp = document.querySelector('#primaryViewer [aria-label="Playback Speed"]');
+    const qBox = qb && qb.closest(".tooltip-box");
+    const sBox = sp && sp.closest(".tooltip-box");
+    let w = document.getElementById("segfix-settings");
+    if (w && w.dataset.owner !== SEGFIX_ID) { w.remove(); w = null; }
+    if (!qBox) { if (w) w.remove(); document.getElementById("segfix-chatbar")?.remove(); return; }
+    qBox.classList.add("segfix-hidden-ctl");
+    if (sBox) sBox.classList.add("segfix-hidden-ctl");
+    if (!w) w = buildSettings();
+    if (w.previousElementSibling !== qBox) qBox.insertAdjacentElement("afterend", w);
+    // Chat button: live games only, where Speed used to be.
+    let cb = document.getElementById("segfix-chatbar");
+    if (cb && cb.dataset.owner !== SEGFIX_ID) { cb.remove(); cb = null; }
+    if (!hasChat) { if (cb) cb.remove(); }
+    else {
+      if (!cb) cb = buildChatButton();
+      const after = sBox || w;
+      if (cb.previousElementSibling !== after) after.insertAdjacentElement("afterend", cb);
+      cb.classList.toggle("on", chat.open);
+      cb.title = chat.open ? "Hide chat (C)" : "Show chat (C)";
+      cb.setAttribute("aria-label", cb.title);
+      cb.setAttribute("aria-pressed", String(chat.open));
+    }
+    // Keep shown values fresh while the menu is open (quality settles, speed keys...).
+    if (w.classList.contains("open") && !setConfirm) {
+      const sig = JSON.stringify([settingsRows(), setOpenRow && settingsChoices(setOpenRow), radioDelay]);
+      if (w.dataset.sig !== sig) { w.dataset.sig = sig; renderSettings(); }
+    }
+    syncRadioDelay();
   }
 
   function placeChat() {
@@ -2221,6 +2547,7 @@
     document.getElementById("segfix-chatbtn")?.remove();     // (old corner button; the toggle lives in the quality menu now)
     // Chat is a live-game thing: replays never get the option.
     const hasChat = onWatch && !!chatEl() && isLiveNow();
+    if (onWatch) keepAudioPref();
     syncChatColumn(hasChat);
     if (!hasChat) {
       if (frame) frame.remove();
@@ -2234,6 +2561,12 @@
     else if (frame) frame.remove();
   }
   actions.c = () => toggleChat();
+  // A: flip between TV and the radio call.
+  actions.a = () => {
+    const f = audioFeeds();
+    if (!f || !f.opts.some((o) => o.name === "Radio")) return toast("No radio call for this game");
+    setAudioFeed(f.current === "Radio" ? (f.opts.find((o) => o.name === "English") || f.opts[0]).name : "Radio");
+  };
   onWin("resize", () => { if (chat.open) { placeChat(); saveChat(); } });
   onDoc("fullscreenchange", () => setTimeout(syncChat, 50));
   setInterval(syncChat, 250);

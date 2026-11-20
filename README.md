@@ -6,14 +6,15 @@ A cleaner, smoother [SEG+](https://www.segplus.com) player for Jazz and Mammoth 
 
 ## What it does
 
-- **Start where you want:** from the beginning, at tip-off, or live.
-- **Skip breaks:** press **Skip** (or **Enter**) when a commercial starts, or turn on **Auto-skip**. **H** skips halftime.
+- **Start where you want:** from the beginning, at tip-off or puck drop, or live.
+- **Skip breaks:** press **Skip** (or **Enter**) when a commercial starts, or turn on **Auto-skip**. **H** skips halftime or the intermission.
 - **Better player:** fullscreen that stays put, a real scoreboard, never starts muted, no "Are you still watching?"
-- **No clutter:** chat, pop-ups and banners are gone. Want chat during a live game? Turn it on in the ⚙ menu.
-- **Your quality stays put:** pick a resolution in the ⚙ menu and it sticks until you change it.
+- **No clutter:** chat, pop-ups and banners are gone. Want chat during a live game? Click the chat button.
+- **One ⚙ menu:** quality, speed and audio in one place. Your quality pick sticks until you change it.
+- **Radio call:** switch to the radio broadcast, lined up with the picture (adjust with **[** and **]**).
 - **Jazz only:** hide G League games from the Jazz replays row.
 
-**Keys:** Space play/pause · ←/→ 10s · ↓ last play · S skip · H halftime · G live · M mute · F fullscreen · C chat
+**Keys:** Space play/pause · ←/→ 10s · ↓ last play · S skip · H halftime · G live · M mute · F fullscreen · C chat · A TV/radio
 
 ## Install
 
