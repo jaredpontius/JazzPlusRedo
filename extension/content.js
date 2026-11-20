@@ -2159,9 +2159,11 @@
   // ---- Audio: TV, Spanish or radio call -------------------------------------
   // SEG+ carries these as separate streams of the same game in its own
   // "Streams" menu (top bar). We click SEG+'s own buttons; playback keeps its
-  // place. The choice is remembered for the next game.
-  const AUDIO_KEY = "segfix-audio";
-  let audioPref = (() => { try { return localStorage.getItem(AUDIO_KEY) || ""; } catch (e) { return ""; } })();
+  // place.
+  try { localStorage.removeItem("segfix-audio"); } catch (e) {}   // (older versions remembered it)
+  // Every game starts on TV (SEG+'s "English" stream). A pick (Radio,
+  // Spanish) holds for that game only.
+  let audioPref = "English", audioPrefPage = "";
   let audioApplied = "";                           // page where the saved choice was applied
   const audioName = (t) => (/^english$/i.test(t) ? "TV" : t);
   function audioFeeds() {
@@ -2179,13 +2181,14 @@
     const o = f && f.opts.find((x) => x.name === name);
     if (!o) return;
     audioPref = name;
-    try { localStorage.setItem(AUDIO_KEY, name); } catch (e) {}
+    audioPrefPage = location.pathname;
     if (f.current !== name) o.b.click();
     if (!quiet) toast(name === "Radio" ? "Radio call" : name === "English" ? "TV audio" : audioName(name) + " audio");
   }
-  // Use the saved choice once per game, after the game has started playing.
+  // Once per game, after it starts playing: TV, unless picked otherwise here.
   function keepAudioPref() {
-    if (!audioPref || audioApplied === location.pathname) return;
+    if (audioApplied === location.pathname) return;
+    if (audioPrefPage !== location.pathname) audioPref = "English";
     const f = audioFeeds();
     if (!f) return;
     let playing = false;
