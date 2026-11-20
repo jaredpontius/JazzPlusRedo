@@ -2247,7 +2247,7 @@
   const STARS_KEY = "segfix-jazz-only";
   const STARS_RE = /Salt Lake City Stars/i;
   let jazzOnly = (() => { try { return localStorage.getItem(STARS_KEY) === "1"; } catch (e) { return false; } })();
-  function decorateReplayFilter() {
+  function decorateReplayFilter(reset) {
     for (const h of document.querySelectorAll(".content-slider h2")) {
       if (!/Replays/i.test(h.textContent || "")) continue;
       const row = h.closest(".content-slider");
@@ -2266,7 +2266,7 @@
             e.preventDefault(); e.stopPropagation();
             jazzOnly = b.dataset.v === "jazz";
             try { localStorage.setItem(STARS_KEY, jazzOnly ? "1" : "0"); } catch (err) {}
-            decorateReplayFilter();
+            decorateReplayFilter(true);
           });
         }
         h.parentElement.appendChild(seg);
@@ -2279,11 +2279,14 @@
       }
       if (changed) {
         const sw = row.querySelector(".swiper") && row.querySelector(".swiper").swiper;
-        try { if (sw) { sw.update(); sw.slideTo(0, 0); } } catch (e) {}
+        // Re-measure only. Jump back to the newest game only when the user
+        // flips the switch, never while they are paging with the arrows
+        // (SEG+ loads more games as you page, which also lands here).
+        try { if (sw) { sw.update(); if (reset === true) sw.slideTo(0, 0); } } catch (e) {}
       }
     }
   }
-  setInterval(decorateReplayFilter, 1000);
+  setInterval(() => decorateReplayFilter(), 1000);
 
   // ---- Run on every page change -------------------------------------------
   let scheduled = false;
